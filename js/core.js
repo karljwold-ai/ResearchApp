@@ -108,6 +108,11 @@
     const enc = (p.messages && p.messages.encouragement) || [];
     enc.forEach((e) => { e.tree = e.when ? cond('message ' + e.id, e.when) : null; if (!p.messages.templates[e.template]) err('message ' + e.id, `unknown template “${e.template}”`); });
     if (!p.consent || !p.consent.version) err('consent', 'a consent version is required');
+    (p.safety || []).forEach((r) => { if (r.referTo && !(p.referralSites || []).some((s) => s.id === r.referTo)) err(r.id, `referTo “${r.referTo}” is not a referral site`); });
+    ((p.analysis && p.analysis.measures) || []).forEach((m) => {
+      if (!isField(m.id)) err('analysis', `measure “${m.id}” is not a field or calculated value`);
+      if (m.cohort && !p.derivedById[m.cohort]) err('analysis', `cohort “${m.cohort}” is not a calculated value`);
+    });
     if (p.messages) ['reminder', 'missed'].forEach((t) => { if (!p.messages.templates[t]) err('messages', `a “${t}” template is required`); });
     if (p.messages && !(p.consent.options || []).some((o) => o.id === p.messages.consentOption)) err('messages', `consentOption “${p.messages.consentOption}” is not a consent option`);
     if (errs.length) throw new Error(`Protocol ${p.id} has problems:\n- ` + errs.join('\n- '));
@@ -399,6 +404,144 @@
   };
 
   /* ------------------------------------------------------------------ */
+  /* Referrals                                                           */
+  /* ------------------------------------------------------------------ */
+  /**
+   * Group fired safety rules into referrals, one per destination: [{to, urgency, rules: [fired]}].
+   * Only rules with a `referTo` refer; the most urgent rule sets the urgency.
+   */
+  RS.referralsFor = function (proto, fired) {
+    const by = new Map();
+    fired.filter((s) => s.rule.referTo).forEach((s) => {
+      const k = s.rule.referTo;
+      if (!by.has(k)) by.set(k, { to: k, rules: [] });
+      by.get(k).rules.push(s);
+    });
+    return [...by.values()].map((g) => Object.assign(g, { urgency: g.rules.some((s) => s.rule.level === 'urgent') ? 'urgent' : 'soon' }));
+  };
+  RS.referralSite = (proto, id) => (proto.referralSites || []).find((s) => s.id === id) || { id, name: id };
+
+  /* ------------------------------------------------------------------ */
+  /* Households                                                          */
+  /* ------------------------------------------------------------------ */
+  RS.householdMembers = (db, p) => (p.household ? db.participants.filter((x) => x.household === p.household && x.id !== p.id) : []);
+  RS.newHouseholdId = (db) => {
+    const nums = db.participants.map((p) => Number(String(p.household || '').replace(/\D/g, ''))).filter((x) => x);
+    return 'H-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(4, '0');
+  };
+
+  /* ------------------------------------------------------------------ */
+  /* Who did what: collector of a cluster                                */
+  /* ------------------------------------------------------------------ */
+  RS.collectorFor = (users, clusterId) => (users || []).find((u) => (u.clusters || []).includes(clusterId)) || null;
+
+  /**
+   * Follow-up and data-quality figures for a set of participants (e.g. one cluster or one collector).
+   * Counts only follow-up visits whose window has opened.
+   */
+  RS.performance = function (db, proto, parts, on) {
+    on = on || today();
+    const ids = new Set(parts.map((p) => p.id));
+    let due = 0, done = 0, inWin = 0, missed = 0, openNow = 0;
+    parts.filter((p) => p.enrolledAt).forEach((p) => proto.visits.slice(1).forEach((v) => {
+      const s = RS.visitStatus(db, p, v, on);
+      const w = RS.visitWindow(p, v);
+      if (s === 'upcoming' || s === 'stopped') return;
+      if (s === 'due') { openNow++; return; }
+      due++;
+      if (s === 'done') {
+        done++;
+        const r = doneRec(db, p.id, v.id);
+        if (r.date >= w.start && r.date <= w.end) inWin++;
+      } else missed++;
+    }));
+    const recs = db.visits.filter((r) => ids.has(r.participantId) && r.status === 'complete');
+    let need = 0, have = 0;
+    recs.forEach((r) => {
+      const p = db.participants.find((x) => x.id === r.participantId);
+      RS.visitSections(proto, proto.visits.find((v) => v.id === r.visit), r.values, RS.ctxForVisit(db, p, r)).forEach((s) => s.fields.forEach((f) => {
+        if (!f.required) return;
+        need++;
+        if (!blank(r.values[f.id])) have++;
+      }));
+    });
+    const refs = (db.referrals || []).filter((x) => ids.has(x.participantId));
+    const refsClosed = refs.filter((x) => x.status !== 'open');
+    return {
+      enrolled: parts.filter((p) => p.enrolledAt).length,
+      withdrawn: parts.filter((p) => p.status === 'withdrawn').length,
+      visitsDue: due, visitsDone: done, visitsInWindow: inWin, visitsMissed: missed, openNow,
+      followUpRate: due ? done / due : null, inWindowRate: due ? inWin / due : null,
+      completeness: need ? have / need : null,
+      queriesOpen: db.queries.filter((q) => ids.has(q.participantId) && q.status !== 'closed').length,
+      queriesRaised: db.queries.filter((q) => ids.has(q.participantId)).length,
+      flagged: recs.filter((r) => (r.safety || []).some((s) => s.level === 'urgent' || s.level === 'soon')).length,
+      referrals: refs.length,
+      referralsCompleted: refs.filter((x) => x.status === 'seen').length,
+      referralCompletion: refsClosed.length ? refs.filter((x) => x.status === 'seen').length / refsClosed.length : null,
+      lastVisit: recs.map((r) => r.date).sort().pop() || null,
+    };
+  };
+
+  /* ------------------------------------------------------------------ */
+  /* Analysis (descriptive, for study management)                        */
+  /* ------------------------------------------------------------------ */
+  const mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null);
+
+  /** One participant's value of a measure at a completed visit (number, or 1/0 for a percent measure). */
+  function measureValue(proto, m, r, ctx) {
+    const d = proto.derivedById[m.id] ? RS.derive(proto, r.values, ctx)[m.id] : r.values[m.id];
+    if (d == null || d === '') return null;
+    if (m.kind === 'percent') return String(d) === String(m.yes) ? 1 : 0;
+    const x = Number(d);
+    return isNaN(x) ? null : x;
+  }
+
+  /**
+   * Mean of a measure at each visit, per group. groups: [{key, label, parts}].
+   * Returns {visits: [visitId with any data], series: [{key, label, points: {visitId: {mean, n}}, change: {mean, n, from, to}}]}.
+   * change = mean within-person change from baseline to each person's latest value (paired).
+   */
+  RS.outcomeSeries = function (db, proto, m, groups) {
+    const series = groups.map((g) => {
+      const byVisit = {};
+      const perPerson = {};
+      g.parts.forEach((p) => {
+        db.visits.filter((r) => r.participantId === p.id && r.status === 'complete').forEach((r) => {
+          const x = measureValue(proto, m, r, RS.ctxForVisit(db, p, r));
+          if (x == null) return;
+          (byVisit[r.visit] = byVisit[r.visit] || []).push(x);
+          (perPerson[p.id] = perPerson[p.id] || []).push({ visit: r.visit, date: r.date, x });
+        });
+      });
+      const points = {};
+      Object.entries(byVisit).forEach(([v, xs]) => { points[v] = { mean: mean(xs), n: xs.length }; });
+      const deltas = Object.values(perPerson).map((list) => {
+        const base = list.find((e) => e.visit === 'baseline');
+        const last = list.filter((e) => e.visit !== 'baseline').sort((a, b) => a.date.localeCompare(b.date)).pop();
+        return base && last ? last.x - base.x : null;
+      }).filter((x) => x != null);
+      return { key: g.key, label: g.label, points, change: { mean: mean(deltas), n: deltas.length } };
+    });
+    const visits = proto.visits.map((v) => v.id).filter((v) => series.some((s) => s.points[v]));
+    return { visits, series };
+  };
+
+  /** Is a participant in a cohort (a yes/no calculated value from their screening answers)? */
+  RS.inCohort = (proto, p, cohort) => !cohort || RS.derive(proto, (p.screening && p.screening.answers) || {}, RS.ctxFor(p))[cohort] === 'yes';
+
+  /** Cumulative enrolment by month: {months: ['2025-10', …], series: [{key, label, counts: [...]}]}. */
+  RS.enrolmentSeries = function (groups, on) {
+    const dates = groups.flatMap((g) => g.parts.map((p) => p.enrolledAt)).filter(Boolean).sort();
+    if (!dates.length) return { months: [], series: groups.map((g) => ({ key: g.key, label: g.label, counts: [] })) };
+    const months = [];
+    let y = Number(dates[0].slice(0, 4)), mo = Number(dates[0].slice(5, 7));
+    const end = (on || today()).slice(0, 7);
+    for (;;) { const k = `${y}-${String(mo).padStart(2, '0')}`; months.push(k); if (k >= end) break; mo++; if (mo > 12) { mo = 1; y++; } }
+    return { months, series: groups.map((g) => ({ key: g.key, label: g.label, counts: months.map((k) => g.parts.filter((p) => p.enrolledAt && p.enrolledAt.slice(0, 7) <= k).length) })) };
+  };
+
+  /* ------------------------------------------------------------------ */
   /* CSV export                                                          */
   /* ------------------------------------------------------------------ */
   const cell = (x) => { const s = x == null ? '' : String(x); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
@@ -407,14 +550,14 @@
   /** One row per completed visit; every protocol field and derived value as a column. Names are left out (study ID only). */
   RS.exportVisits = function (db, proto) {
     const fields = Object.values(proto.fields).filter((f) => proto.formOf[f.id] !== 'screening');
-    const head = ['study_id', 'cluster', 'visit', 'visit_date', 'in_window', 'collector', 'protocol_version', 'consent_version', ...fields.flatMap((f) => [f.id, f.id + '_missing_reason']), ...proto.derived.map((d) => d.id), 'safety_flags', 'open_queries'];
+    const head = ['study_id', 'household_id', 'cluster', 'visit', 'visit_date', 'in_window', 'collector', 'protocol_version', 'consent_version', ...fields.flatMap((f) => [f.id, f.id + '_missing_reason']), ...proto.derived.map((d) => d.id), 'safety_flags', 'open_queries'];
     const rows = [head];
     db.visits.filter((r) => r.status === 'complete').sort((a, b) => a.date.localeCompare(b.date)).forEach((r) => {
       const p = db.participants.find((x) => x.id === r.participantId);
       const vd = proto.visits.find((v) => v.id === r.visit);
       const w = RS.visitWindow(p, vd);
       const d = RS.derive(proto, r.values, RS.ctxForVisit(db, p, r));
-      rows.push([p.studyId, p.cluster, r.visit, r.date, r.date >= w.start && r.date <= w.end ? 'yes' : 'no', r.collector, r.protocolVersion, p.consent && p.consent.version,
+      rows.push([p.studyId, p.household || '', p.cluster, r.visit, r.date, r.date >= w.start && r.date <= w.end ? 'yes' : 'no', r.collector, r.protocolVersion, p.consent && p.consent.version,
         ...fields.flatMap((f) => [r.values[f.id], (r.missing || {})[f.id]]), ...proto.derived.map((x) => d[x.id]),
         (r.safety || []).map((s) => s.id).join(' '), db.queries.filter((q) => q.visitRecId === r.id && q.status !== 'closed').length]);
     });
@@ -423,8 +566,8 @@
   RS.exportParticipants = function (db) {
     const opts = (RS.protocol().consent.options || []).map((o) => o.id);
     const clusterOf = (p) => (RS.protocol().clusters || []).find((c) => c.id === p.cluster) || {};
-    const rows = [['study_id', 'screening_no', 'status', 'sex', 'age_at_screening', 'cluster', 'arm', 'screened', 'enrolled', 'consent_version', ...opts.map((o) => 'consent_' + o), 'withdrawn', 'withdrawal_reason', 'data_use_after_withdrawal', 'screen_fail_reasons']];
-    db.participants.forEach((p) => rows.push([p.studyId || '', p.screeningNo, p.status, p.sex, ageYears(p.dob, p.screenedAt), clusterOf(p).name, clusterOf(p).arm, p.screenedAt, p.enrolledAt || '', p.consent ? p.consent.version : '',
+    const rows = [['study_id', 'screening_no', 'household_id', 'status', 'sex', 'age_at_screening', 'cluster', 'arm', 'screened', 'enrolled', 'consent_version', ...opts.map((o) => 'consent_' + o), 'withdrawn', 'withdrawal_reason', 'data_use_after_withdrawal', 'screen_fail_reasons']];
+    db.participants.forEach((p) => rows.push([p.studyId || '', p.screeningNo, p.household || '', p.status, p.sex, ageYears(p.dob, p.screenedAt), clusterOf(p).name, clusterOf(p).arm, p.screenedAt, p.enrolledAt || '', p.consent ? p.consent.version : '',
       ...opts.map((o) => (p.consent ? (p.consent.options[o] ? 'yes' : 'no') : '')), p.withdrawal ? p.withdrawal.date : '', p.withdrawal ? p.withdrawal.reason : '', p.withdrawal ? p.withdrawal.dataUse : '', (p.screenFail || []).join('; ')]));
     return RS.toCSV(rows);
   };
@@ -433,8 +576,8 @@
   /* Storage                                                             */
   /* ------------------------------------------------------------------ */
   RS.STORE_KEY = 'icehall.research.v1';
-  RS.SEED_VERSION = 1;
-  RS.emptyDb = () => ({ version: RS.SEED_VERSION, participants: [], visits: [], queries: [], audit: [], messages: [], events: [], dismissed: {}, screeningCount: 0 });
+  RS.SEED_VERSION = 2;
+  RS.emptyDb = () => ({ version: RS.SEED_VERSION, participants: [], visits: [], queries: [], audit: [], messages: [], events: [], referrals: [], dismissed: {}, screeningCount: 0 });
   RS.load = function () {
     try {
       const raw = G.localStorage && G.localStorage.getItem(RS.STORE_KEY);

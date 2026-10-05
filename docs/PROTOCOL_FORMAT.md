@@ -136,6 +136,38 @@ Rules show live while the form is filled in. Before an `urgent`, `soon` or `repo
 be completed, the collector records what was done. `urgent` and `report` rules also create a safety
 event for the supervisor to assess. `{field}` in the text is filled in, e.g. `BP {sys_mean}/{dia_mean}`.
 
+## Referrals
+
+```js
+referralSites: [{ id: 'chdr', name: 'Area health centre: Community Health Doctor (CHDr)' }, { id: 'emergency', name: '…', note: '…' }],
+handoff: {
+  findings: ['bp_1', 'sys_mean', 'pulse', 'hba1c'],    // measurements on the sheet
+  symptoms: ['chest_pain', 'admitted', 'admit_reason'], // shown when yes (or when text)
+  history: ['cohort_dm', 'cvd_hx'],
+  medicines: ['on_htn_meds', 'med_list'],
+  sensitive: { mental_health: ['phq9_total'] },        // only on a referral to that site
+  compare: ['sys_mean', 'hba1c'],                      // against the last visit
+},
+```
+
+A safety rule with `referTo: '<site id>'` offers **Referred: handoff given**. Rules for the same site at
+one visit share one referral and one sheet; an `urgent` rule makes it urgent.
+
+## Analysis
+
+```js
+analysis: {
+  note: 'Shown at the top of the Analysis screen',
+  measures: [
+    { id: 'sys_mean', label: 'Systolic BP', unit: 'mmHg', cohort: 'cohort_htn', better: 'lower' },
+    { id: 'bp_controlled', label: 'BP below 140/90', kind: 'percent', yes: 'yes', cohort: 'cohort_htn', better: 'higher' },
+  ],
+},
+```
+
+`id` is a field or a calculated value. `cohort` is a yes/no calculated value from the screening answers,
+and it limits who is counted. `better` sets which direction of change shows as an improvement.
+
 ## Messages
 
 ```js

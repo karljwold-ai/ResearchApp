@@ -285,3 +285,70 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
   .view { padding: 14px 16px 60px; }
   .grid-2 { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- Supervisor review ---------- */
+.seg-select { border: 0; background: transparent; font-size: 13px; font-weight: 700; color: var(--muted); padding: 4px 2px; max-width: 150px; }
+body[data-role="COLLECTOR"] .seg-select { color: var(--level); }
+.page.wide { max-width: 1300px; }
+.filters { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin-bottom: 14px; }
+.filters label { min-width: 200px; }
+.kpi em { display: block; font-style: normal; font-size: 12px; color: var(--muted); }
+.tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
+.tbl th.num { text-align: right; }
+.tbl.perf td, .tbl.perf th { white-space: nowrap; }
+.tbl.compact td, .tbl.compact th { padding: 6px 8px; }
+.warn-cell { background: var(--amber-soft); color: var(--amber); font-weight: 700; }
+.key { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: -1px; }
+.delta { font-weight: 700; }
+.delta.better { color: #006300; }
+.delta.worse { color: var(--red); }
+.an-grid { align-items: start; }
+.measure-chips { margin-bottom: 8px; }
+.measure-chips .chip { min-height: 32px; font-size: 13px; padding: 0 10px; }
+
+/* ---------- Charts ---------- */
+.chart { position: relative; margin: 4px 0 10px; }
+.chart .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.chart .legend i { display: inline-block; width: 14px; height: 2px; border-radius: 1px; margin-right: 6px; vertical-align: middle; }
+.chart-box { position: relative; }
+.chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart .grid { stroke: #e1e0d9; stroke-width: 1; }
+.chart .tick { font-size: 11px; fill: #898781; font-variant-numeric: tabular-nums; }
+.chart .crosshair { stroke: #898781; stroke-width: 1; }
+.chart .hit { cursor: crosshair; }
+.chart .tip { position: absolute; top: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 8px 10px; font-size: 12px; pointer-events: none; min-width: 150px; z-index: 2; }
+.chart .tip-head { font-weight: 700; color: var(--muted); margin-bottom: 4px; }
+.chart .tip-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.chart .tip-row i { display: inline-block; width: 12px; height: 2px; }
+.chart .tip-row b { font-size: 13px; color: var(--ink); }
+.chart .tip-row span { color: var(--muted); }
+
+/* ---------- Referral handoff ---------- */
+.handoff-preview { border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: #fff; max-height: 55vh; overflow-y: auto; }
+.handoff { color: #000; font-size: 14px; }
+.handoff h1 { font-size: 20px; margin: 2px 0 6px; }
+.handoff h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; margin: 14px 0 6px; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+.handoff table { width: 100%; border-collapse: collapse; }
+.handoff td { padding: 3px 6px 3px 0; vertical-align: top; }
+.handoff td:first-child { width: 42%; color: #333; }
+.handoff ul { margin: 0; }
+.ho-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; border-bottom: 2px solid #000; padding-bottom: 8px; }
+.ho-kicker { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #333; }
+.ho-urg { display: inline-block; font-weight: 800; border: 2px solid #000; padding: 2px 8px; border-radius: 6px; }
+.ho-urg.urgent { background: #000; color: #fff; }
+.ho-id { text-align: right; font-size: 13px; }
+.ho-id b { font-size: 16px; font-family: ui-monospace, Menlo, monospace; }
+.ho-note { font-size: 12px; color: #333; }
+.ho-return { border: 2px dashed #000; border-radius: 8px; padding: 0 10px 8px; margin-top: 14px; }
+.ho-return td.line { border-bottom: 1px solid #000; height: 26px; }
+#print { display: none; }
+@media print {
+  body { background: #fff; }
+  .app, .modal, .scrim, .toast { display: none !important; }
+  #print { display: block; }
+  #print .handoff { font-size: 12pt; }
+  @page { margin: 14mm; }
+}
+.tbl.compact td:first-child { white-space: nowrap; }
+@media (max-width: 1150px) { .an-grid { grid-template-columns: minmax(0, 1fr); } }
+.an-grid .card { overflow-x: auto; }

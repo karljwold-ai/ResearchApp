@@ -33,6 +33,10 @@
     download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
     edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
     send: '<path d="M21 3 10 14"/><path d="M21 3l-7 18-4-7-7-4z"/>',
+    chart: '<path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/>',
+    printer: '<path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/>',
+    house: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
+    transfer: '<path d="M4 8h14l-4-4"/><path d="M20 16H6l4 4"/>',
   };
   const icon = (n) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
@@ -42,16 +46,25 @@
   const UI_KEY = 'icehall.research.ui';
   const ui = (() => { try { return JSON.parse(localStorage.getItem(UI_KEY)) || {}; } catch (e) { return {}; } })();
   const S = {
-    role: ui.role || 'COLLECTOR', test: !!ui.test, screen: null, pid: null, recId: null,
-    q: '', recFilter: 'enrolled', groupBy: 'status', msgTab: 'suggested', reviewTab: 'queries',
+    role: ui.role || 'COLLECTOR', collectorId: ui.collectorId || RS.STAFF.collectors[0].id, test: !!ui.test, screen: null, pid: null, recId: null,
+    q: '', recFilter: 'enrolled', recCluster: 'mine', groupBy: 'status', msgTab: 'suggested', reviewTab: 'overview',
+    f: { cluster: 'all', collector: 'all' }, an: { split: 'cluster', measure: 'sys_mean' },
     idDraft: null, compose: null, modal: null, tried: false, missingOpen: null, showSensitive: {},
     listen: { recId: null, text: '', recording: false, interim: '', mode: 'check' },
   };
-  S.screen = S.role === 'SUPERVISOR' ? 'review' : 'schedule';
-  const saveUi = () => { try { localStorage.setItem(UI_KEY, JSON.stringify({ role: S.role, test: S.test })); } catch (e) { /* private mode */ } };
+  if (!RS.STAFF.collectors.some((c) => c.id === S.collectorId)) S.collectorId = RS.STAFF.collectors[0].id;
+  const homeScreen = () => (S.role === 'SUPERVISOR' ? 'quality' : 'schedule');
+  S.screen = homeScreen();
+  const saveUi = () => { try { localStorage.setItem(UI_KEY, JSON.stringify({ role: S.role, collectorId: S.collectorId, test: S.test })); } catch (e) { /* private mode */ } };
   const save = () => RS.save(db);
-  const me = () => RS.USERS[S.role];
   const isSup = () => S.role === 'SUPERVISOR';
+  const me = () => (isSup() ? RS.STAFF.supervisor : RS.STAFF.collectors.find((c) => c.id === S.collectorId));
+  /** Clusters this collector works in (all, for the supervisor). */
+  const myClusters = () => (isSup() ? P.clusters.map((c) => c.id) : me().clusters);
+  const isMine = (p) => myClusters().includes(p.cluster);
+  const collectorName = (clusterId) => (RS.collectorFor(RS.STAFF.collectors, clusterId) || { name: '—' }).name;
+  /** The supervisor's cluster / collector filter. */
+  const inScope = (p) => (S.f.cluster === 'all' || p.cluster === S.f.cluster) && (S.f.collector === 'all' || (RS.STAFF.collectors.find((c) => c.id === S.f.collector) || { clusters: [] }).clusters.includes(p.cluster));
   const part = (id) => db.participants.find((p) => p.id === id);
   const rec = (id) => db.visits.find((r) => r.id === id);
   const visitDef = (id) => P.visits.find((v) => v.id === id);
@@ -93,21 +106,27 @@
   /* ------------------------------------------------------------------ */
   /* Navigation                                                          */
   /* ------------------------------------------------------------------ */
-  const openQueries = () => db.queries.filter((q) => q.status === 'open');
+  const openQueries = () => db.queries.filter((q) => q.status === 'open' && isMine(part(q.participantId)));
+  const myRows = () => RS.scheduleRows(db, P, null, 30).filter((r) => isMine(r.participant));
   function navItems() {
-    const sched = RS.scheduleRows(db, P, null, 30).filter((r) => r.status !== 'upcoming').length;
-    const sugg = suggestions().length;
     const pending = db.messages.filter((m) => m.status === 'pending').length;
     const items = [];
     if (isSup()) {
+      // Review only: the supervisor doesn't run visits or message participants.
       const toReview = db.visits.filter((r) => r.status === 'complete' && !r.reviewed).length;
       const ev = db.events.filter((e) => e.status === 'new').length;
-      items.push(['review', 'Data review', 'shield', db.queries.filter((q) => q.status === 'answered').length + toReview + ev, ev ? 'urgent' : '']);
+      items.push(['quality', 'Data quality', 'shield', db.queries.filter((q) => q.status === 'answered').length + toReview + ev, ev ? 'urgent' : '']);
+      items.push(['analysis', 'Analysis', 'chart']);
+      items.push(['sep']);
+      items.push(['records', 'Participant records', 'folder']);
+      items.push(['schedule', 'Schedule', 'calendar']);
+      items.push(['messages', 'Messaging', 'message', pending]);
+    } else {
+      items.push(['initial', 'Initial visit', 'plus', db.participants.filter((p) => p.status === 'screening' && isMine(p)).length]);
+      items.push(['records', 'Participant records', 'folder', openQueries().length]);
+      items.push(['schedule', 'Schedule', 'calendar', myRows().filter((r) => r.status !== 'upcoming').length]);
+      items.push(['messages', 'Messaging', 'message', suggestions().length]);
     }
-    items.push(['initial', 'Initial visit', 'plus', db.participants.filter((p) => p.status === 'screening').length]);
-    items.push(['records', 'Participant records', 'folder', isSup() ? 0 : openQueries().length]);
-    items.push(['schedule', 'Schedule', 'calendar', sched]);
-    items.push(['messages', 'Messaging', 'message', isSup() ? pending + sugg : sugg]);
     items.push(['sep']);
     items.push(['protocol', 'Protocol', 'doc']);
     return items;
@@ -130,14 +149,23 @@
         <button class="btn sm ghost" data-action="reset-demo">${icon('reset')}<span class="nav-label">Reset demo data</span></button>
       </div>`;
     document.querySelectorAll('[data-role]').forEach((b) => b.classList.toggle('active', b.dataset.role === S.role));
+    const sel = $('collectorSel');
+    sel.innerHTML = RS.STAFF.collectors.map((c) => `<option value="${c.id}" ${c.id === S.collectorId ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+    sel.classList.toggle('hidden', isSup());
     $('testBtn').classList.toggle('on', S.test);
     $('testBtn').textContent = S.test ? 'Test tools: on' : 'Test tools';
     document.body.dataset.role = S.role;
   }
 
-  const TITLES = { initial: 'Initial visit', records: 'Participant records', participant: 'Participant', visit: 'Visit', visitview: 'Visit record', schedule: 'Schedule', messages: 'Messaging', review: 'Data review', protocol: 'Protocol' };
+  const TITLES = { initial: 'Initial visit', records: 'Participant records', participant: 'Participant', visit: 'Visit', visitview: 'Visit record', schedule: 'Schedule', messages: 'Messaging', quality: 'Data quality review', analysis: 'Analysis', protocol: 'Protocol' };
+  // Screens each view may open (the supervisor reviews; collectors run visits and message participants).
+  const ALLOWED = {
+    SUPERVISOR: ['quality', 'analysis', 'records', 'participant', 'visitview', 'schedule', 'messages', 'protocol'],
+    COLLECTOR: ['initial', 'records', 'participant', 'visit', 'visitview', 'schedule', 'messages', 'protocol'],
+  };
   function go(screen, opts) {
     if (S.listen.recording && screen !== 'visit') stopMic();
+    if (!ALLOWED[S.role].includes(screen)) screen = homeScreen();
     S.screen = screen;
     S.tried = false; S.missingOpen = null;
     Object.assign(S, opts || {});
@@ -184,7 +212,11 @@
     const i = STEPS.findIndex(([id]) => id === cur);
     return `<div class="steps">${STEPS.map(([id, label], k) => `<div class="step ${k === i ? 'on' : k < i ? 'done' : ''}"><span class="n">${k < i ? '✓' : k + 1}</span>${label}</div>`).join('')}</div>`;
   }
-  const blankId = () => ({ name: '', sex: '', dobMode: 'dob', dob: '', age: '', cluster: '', phone: '', language: P.languages[0] });
+  const blankId = () => ({ name: '', sex: '', dobMode: 'dob', dob: '', age: '', cluster: myClusters().length === 1 ? myClusters()[0] : '', phone: '', language: P.languages[0], houseWith: '' });
+
+  /** People in a cluster someone could share a household with (anyone already screened there). */
+  const housemates = (cluster, exceptId) => db.participants.filter((x) => x.cluster === cluster && x.id !== exceptId && x.status !== 'screen_fail' && x.status !== 'declined').sort((a, b) => a.name.localeCompare(b.name));
+  const houseLabel = (x) => `${x.name} (${pLabel(x)}${x.household ? ', ' + x.household : ''})`;
 
   function screenInitial() {
     const p = S.pid && part(S.pid);
@@ -193,7 +225,7 @@
       if (p.wiz === 'consent') return consentStep(p);
     }
     const d = S.idDraft || (S.idDraft = blankId());
-    const inProgress = db.participants.filter((x) => x.status === 'screening');
+    const inProgress = db.participants.filter((x) => x.status === 'screening' && isMine(x));
     const dup = d.name.trim().length > 3 ? db.participants.filter((x) => x.name.toLowerCase().includes(d.name.trim().toLowerCase().split(/\s+/).pop()) && (!d.cluster || x.cluster === d.cluster)) : [];
     const ok = d.name.trim() && d.sex && d.cluster && (d.dobMode === 'dob' ? d.dob : d.age);
     return `<div class="page narrow">
@@ -207,9 +239,11 @@
           <div><span class="lbl">Sex</span><div class="chips">${[['F', 'Female'], ['M', 'Male']].map(([k, l]) => `<button class="chip ${d.sex === k ? 'on' : ''}" data-action="id-set" data-k="sex" data-v="${k}">${l}</button>`).join('')}</div></div>
           <div><span class="lbl">Age</span><div class="chips" style="margin-bottom:6px">${[['dob', 'Date of birth'], ['age', 'Age in years']].map(([k, l]) => `<button class="chip ${d.dobMode === k ? 'on' : ''}" data-action="id-set" data-k="dobMode" data-v="${k}">${l}</button>`).join('')}</div>
             ${d.dobMode === 'dob' ? `<input class="input" type="date" id="id-dob" data-input="id" data-k="dob" value="${esc(d.dob)}" max="${D.today()}">` : `<input class="input" id="id-age" inputmode="numeric" data-input="id" data-k="age" value="${esc(d.age)}" placeholder="Years">`}</div>
-          <label><span class="lbl">Cluster</span><select class="input" id="id-cluster" data-change="id" data-k="cluster"><option value="">Choose…</option>${P.clusters.map((c) => `<option value="${c.id}" ${d.cluster === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+          <label><span class="lbl">Cluster</span><select class="input" id="id-cluster" data-change="id" data-k="cluster"><option value="">Choose…</option>${P.clusters.filter((c) => myClusters().includes(c.id)).map((c) => `<option value="${c.id}" ${d.cluster === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
           <label><span class="lbl">Phone (optional)</span><input class="input" id="id-phone" inputmode="tel" data-input="id" data-k="phone" value="${esc(d.phone)}"></label>
           <label><span class="lbl">Language for consent</span><select class="input" id="id-lang" data-change="id" data-k="language">${P.languages.map((l) => `<option ${d.language === l ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+          <label><span class="lbl">Household</span><select class="input" id="id-house" data-change="id" data-k="houseWith" ${d.cluster ? '' : 'disabled'}>
+            <option value="">New household</option>${d.cluster ? housemates(d.cluster).map((x) => `<option value="${x.id}" ${d.houseWith === x.id ? 'selected' : ''}>Same household as ${esc(houseLabel(x))}</option>`).join('') : ''}</select></label>
         </div>
         ${dup.length ? `<div class="alert warn" style="margin-top:12px">${icon('alert')}<div><strong>Already screened?</strong>${dup.map((x) => `${esc(x.name)} (${esc(pLabel(x))}, ${esc(clusterOf(x).name)}, ${esc(STATUS_TEXT[x.status])})`).join('; ')}. Check before screening again.</div></div>` : ''}
         <div class="btn-row end" style="margin-top:14px"><button class="btn primary" data-action="start-screening" ${ok ? '' : 'disabled'}>Continue to eligibility</button></div>
@@ -473,9 +507,23 @@
               <td style="width:1%;white-space:nowrap">${isSup() ? `<button class="btn sm ghost" data-action="raise-query" data-rec="${r.id}" data-field="${f.id}">Query</button> <button class="btn sm ghost" data-action="correct" data-rec="${r.id}" data-field="${f.id}">Correct</button>` : ''}</td></tr>`;
           }).join('')}</tbody></table>`}</div>`;
       }).join('')}
+      ${referralsCard(db.referrals.filter((x) => x.visitRecId === r.id), 'Referrals from this visit')}
       ${derivedCard(RS.derive(P, r.values, ctx), r.values)}
       ${audits.length ? `<div class="card"><h3>Changes after completion</h3><table class="tbl"><tbody>${audits.map(auditRow).join('')}</tbody></table></div>` : ''}
     </div>`;
+  }
+  const REF_STATUS = { open: ['Waiting for outcome', 'pending'], seen: ['Seen', 'ok'], not_attended: ['Did not go', 'missed'] };
+  function referralsCard(refs, title) {
+    if (!refs.length) return '';
+    return `<div class="card"><h3>${esc(title)}</h3><div class="rows" style="margin-top:8px">${refs.map((x) => {
+      const [st, tone] = REF_STATUS[x.status];
+      const days = D.between(x.createdAt.slice(0, 10), D.today());
+      return `<div class="msg"><div class="msg-head"><span><span class="tag ${x.urgency === 'urgent' ? 'urgent' : 'soon'}">${x.urgency === 'urgent' ? 'Urgent' : 'Within a week'}</span> <b>${esc(RS.referralSite(P, x.to).name)}</b></span>
+          <span><span class="tag ${tone}">${st}</span> <span class="small muted">${esc(D.fmt(x.createdAt.slice(0, 10)))}${x.status === 'open' ? ` · ${days} day${days === 1 ? '' : 's'} ago` : ''}</span></span></div>
+        <div class="small">${x.reasons.map((y) => esc(y.text)).join('<br>')}</div>
+        ${x.outcome ? `<div class="small"><b>Outcome</b> (${esc(D.fmt(x.outcome.date))}): ${esc(x.outcome.text)}</div>` : ''}
+        <div class="btn-row"><button class="btn sm" data-action="view-handoff" data-ref="${x.id}">${icon('printer')} Handoff</button>${!isSup() && x.status === 'open' ? `<button class="btn sm primary" data-action="referral-outcome" data-ref="${x.id}">Record outcome</button>` : ''}</div></div>`;
+    }).join('')}</div></div>`;
   }
   const auditRow = (a) => { const f = P.fields[a.field]; return `<tr><td>${esc(fmtDT(a.at))}</td><td>${esc(a.by)}</td><td>${a.field ? `${esc(f ? f.label : a.field)}: <s>${esc(fmtValue(f, a.from))}</s> → <b>${esc(fmtValue(f, a.to))}</b>` : esc(a.what || '')}</td><td class="muted">${esc(a.reason || '')}</td></tr>`; };
   function queryHtml(q) {
@@ -491,13 +539,19 @@
   function screenRecords() {
     const q = S.q.trim().toLowerCase();
     const counts = {};
-    db.participants.forEach((p) => { counts[p.status] = (counts[p.status] || 0) + 1; });
-    const list = db.participants.filter((p) => (S.recFilter === 'all' || p.status === S.recFilter || (S.recFilter === 'screen_fail' && p.status === 'declined')) && (!q || [p.name, p.studyId, p.screeningNo, clusterOf(p).name, p.phone].some((x) => String(x || '').toLowerCase().includes(q))));
+    if (isSup() && S.recCluster === 'mine') S.recCluster = 'all';
+    const inCluster = (p) => (S.recCluster === 'mine' ? isMine(p) : S.recCluster === 'all' || p.cluster === S.recCluster);
+    const scoped = db.participants.filter(inCluster);
+    scoped.forEach((p) => { counts[p.status] = (counts[p.status] || 0) + 1; });
+    const list = scoped.filter((p) => (S.recFilter === 'all' || p.status === S.recFilter || (S.recFilter === 'screen_fail' && p.status === 'declined')) && (!q || [p.name, p.studyId, p.screeningNo, clusterOf(p).name, p.phone, p.household].some((x) => String(x || '').toLowerCase().includes(q))));
     const myQs = openQueries();
     return `<div class="page">
+      <div class="btn-row" style="margin-bottom:10px"><select class="input sm" style="max-width:260px" data-change="rec-cluster" aria-label="Clusters">
+        ${isSup() ? '' : `<option value="mine" ${S.recCluster === 'mine' ? 'selected' : ''}>My clusters</option>`}<option value="all" ${S.recCluster === 'all' || (isSup() && S.recCluster === 'mine') ? 'selected' : ''}>All clusters</option>
+        ${P.clusters.map((c) => `<option value="${c.id}" ${S.recCluster === c.id ? 'selected' : ''}>${esc(c.name)} (${esc(collectorName(c.id))})</option>`).join('')}</select></div>
       ${!isSup() && myQs.length ? `<div class="alert warn">${icon('alert')}<div><strong>${myQs.length} data quer${myQs.length === 1 ? 'y' : 'ies'} to answer</strong>${myQs.map((x) => { const p = part(x.participantId); return `<button class="btn link" data-action="open-rec" data-rec="${x.visitRecId}">${esc(pLabel(p))} · ${esc((P.fields[x.field] || {}).label || x.field)}</button>`; }).join(' · ')}</div></div>` : ''}
       <div class="search">${icon('search')}<input class="input" id="rec-q" data-input="q" value="${esc(S.q)}" placeholder="Search by name, study ID, cluster or phone"></div>
-      <div class="tabs">${[['enrolled', 'Enrolled'], ['screening', 'Screening'], ['screen_fail', 'Not enrolled'], ['withdrawn', 'Withdrawn'], ['all', 'All']].map(([k, l]) => `<button class="${S.recFilter === k ? 'on' : ''}" data-action="rec-filter" data-v="${k}">${l} ${k === 'all' ? db.participants.length : k === 'screen_fail' ? (counts.screen_fail || 0) + (counts.declined || 0) : counts[k] || 0}</button>`).join('')}</div>
+      <div class="tabs">${[['enrolled', 'Enrolled'], ['screening', 'Screening'], ['screen_fail', 'Not enrolled'], ['withdrawn', 'Withdrawn'], ['all', 'All']].map(([k, l]) => `<button class="${S.recFilter === k ? 'on' : ''}" data-action="rec-filter" data-v="${k}">${l} ${k === 'all' ? scoped.length : k === 'screen_fail' ? (counts.screen_fail || 0) + (counts.declined || 0) : counts[k] || 0}</button>`).join('')}</div>
       <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>ID</th><th>Name</th><th>Cluster</th><th>Status</th><th>Next visit</th><th></th></tr></thead><tbody>
         ${list.map((p) => {
           const nx = p.status === 'enrolled' ? RS.nextVisit(db, P, p) : null;
@@ -546,13 +600,15 @@
         ${p.enrolledAt ? `<div class="facts"><span>Enrolled <b>${esc(D.fmtLong(p.enrolledAt))}</b> by ${esc(p.enrolledBy)}</span><span>Consent: ${esc(p.consent.version)} (${esc(p.consent.method)}${p.consent.witness ? ', witness ' + esc(p.consent.witness) : ''})</span></div>` : ''}
         ${p.withdrawal ? `<div class="facts"><span>Withdrew <b>${esc(D.fmtLong(p.withdrawal.date))}</b>: ${esc(p.withdrawal.reason)} · ${esc(p.withdrawal.dataUse)}</span></div>` : ''}
         ${p.screenFail ? `<div class="facts"><span>Not enrolled: ${esc(p.screenFail.join('; '))}</span></div>` : ''}
+        <div class="facts"><span>${icon('house')} Household <b>${esc(p.household || 'not recorded')}</b>${RS.householdMembers(db, p).length ? `: also ${RS.householdMembers(db, p).map((x) => `<button class="btn link" data-action="open-participant" data-pid="${x.id}">${esc(x.name)}</button> (${esc(STATUS_TEXT[x.status])})`).join(', ')}` : ''}</span><span>Data collector: ${esc(collectorName(p.cluster))}</span></div>
         ${opts ? `<div class="consent-icons">${opts}</div>` : ''}
       </div>
-      <div class="btn-row">
+      ${isSup() ? '' : `<div class="btn-row">
         ${p.status === 'screening' ? `<button class="btn primary" data-action="resume-screening" data-pid="${p.id}">Continue screening</button>` : ''}
         ${RS.canText(p) ? `<button class="btn" data-action="compose-to" data-pid="${p.id}">${icon('message')} Message</button>` : ''}
+        <button class="btn" data-action="household" data-pid="${p.id}">${icon('house')} Household</button>
         ${p.status === 'enrolled' ? `<button class="btn" data-action="consent-change" data-pid="${p.id}">Optional parts</button><button class="btn ghost" data-action="withdraw" data-pid="${p.id}">Withdraw</button>` : ''}
-      </div></div></div>
+      </div>`}</div></div>
       ${p.status === 'enrolled' || p.status === 'withdrawn' ? `<div class="card"><div class="card-head"><h3>Visits</h3><span class="muted small">Windows are counted from enrolment, so a late visit doesn't move the next one</span></div>
         <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Visit</th><th>Window</th><th>Status</th><th>Done</th><th>BP</th>${a1c.length ? '<th>HbA1c</th>' : ''}<th></th></tr></thead><tbody>
         ${P.visits.map((v) => {
@@ -564,13 +620,14 @@
           const nq = r ? db.queries.filter((q) => q.visitRecId === r.id && q.status !== 'closed').length : 0;
           let act = '';
           if (r) act = `<button class="btn sm" data-action="open-rec" data-rec="${r.id}">View</button>`;
-          else if (draft) act = `<button class="btn sm primary" data-action="open-rec" data-rec="${draft.id}">Continue</button>`;
-          else if (RS.canStart(db, p, v)) act = `<button class="btn sm ${st === 'due' ? 'primary' : ''}" data-action="start-visit" data-pid="${p.id}" data-visit="${v.id}">Start${st === 'missed' ? ' (late)' : ''}</button>`;
+          else if (draft) act = isSup() ? '<span class="tag due">In progress</span>' : `<button class="btn sm primary" data-action="open-rec" data-rec="${draft.id}">Continue</button>`;
+          else if (RS.canStart(db, p, v) && !isSup()) act = `<button class="btn sm ${st === 'due' ? 'primary' : ''}" data-action="start-visit" data-pid="${p.id}" data-visit="${v.id}">Start${st === 'missed' ? ' (late)' : ''}</button>`;
           return `<tr><td><b>${esc(v.label)}</b></td><td class="small">${esc(RS.rangeText(w))}</td><td><span class="tag ${st}">${VSTATUS[st]}</span>${st !== 'done' && st !== 'stopped' ? `<div class="small muted">${esc(RS.windowText(st, w))}</div>` : ''}</td>
             <td class="small">${r ? esc(D.fmt(r.date)) : ''}${nq ? ` <span class="tag warn">${nq} query</span>` : ''}${r && r.safety && r.safety.length ? ` <span class="tag ${r.safety[0].level}">${r.safety.length} flag${r.safety.length === 1 ? '' : 's'}</span>` : ''}</td>
             <td>${d.sys_mean != null ? `${d.sys_mean}/${d.dia_mean}` : ''}</td>${a1c.length ? `<td>${r && r.values.hba1c != null ? r.values.hba1c + '%' : ''}</td>` : ''}<td>${act}</td></tr>`;
         }).join('')}</tbody></table></div></div>` : ''}
       ${pts.length ? `<div class="card"><div class="card-head"><h3>Blood pressure by visit</h3><span class="small muted"><span style="color:#1d4f91">●</span> systolic <span style="color:#7b3f8f">●</span> diastolic (mean of readings 2–3) · dashed: 140/90</span></div>${trendSvg(pts)}</div>` : ''}
+      ${referralsCard(db.referrals.filter((x) => x.participantId === p.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), 'Referrals')}
       ${qs.length || evs.length ? `<div class="grid-2">
         <div class="card"><h3>Data queries</h3>${qs.map((q) => `<div style="margin-top:8px"><button class="btn link" data-action="open-rec" data-rec="${q.visitRecId}">${esc(visitDef(rec(q.visitRecId).visit).label)} · ${esc((P.fields[q.field] || {}).label || q.field)}</button>${queryHtml(q)}</div>`).join('') || '<p class="empty">None</p>'}</div>
         <div class="card"><h3>Safety events</h3>${evs.map(eventHtml).join('') || '<p class="empty">None</p>'}</div></div>` : ''}
@@ -589,21 +646,26 @@
   /* Schedule                                                            */
   /* ------------------------------------------------------------------ */
   function screenSchedule() {
-    const rows = RS.scheduleRows(db, P, null, 30);
+    const rows = isSup() ? RS.scheduleRows(db, P, null, 30).filter((x) => inScope(x.participant)) : myRows();
     const row = (x) => {
       const p = x.participant;
       const reminded = db.messages.some((m) => m.status === 'sent' && m.kind === 'reminder' && m.key === `${p.id}:${x.visit.id}`);
-      return `<div class="row ${x.status}"><div class="who click" data-action="open-participant" data-pid="${p.id}" style="cursor:pointer"><strong>${esc(p.name)}</strong><span class="meta">${esc(pLabel(p))} · ${esc(clusterOf(p).name)}${p.phone ? ' · ' + esc(p.phone) : ''}</span></div>
+      // Others in the same household with a visit open now: visit them together.
+      const mates = RS.householdMembers(db, p).filter((m) => rows.some((y) => y.participant.id === m.id && y.status !== 'upcoming'));
+      const actions = isSup() ? `<span class="small muted">${esc(collectorName(p.cluster))}</span>` : `${reminded ? '<span class="tag ok">Reminded</span>' : RS.canText(p) && x.status !== 'missed' ? `<button class="btn sm ghost" data-action="remind" data-pid="${p.id}" data-visit="${x.visit.id}">${icon('message')} Remind</button>` : ''}
+          ${x.draft ? `<button class="btn sm primary" data-action="open-rec" data-rec="${RS.draftRec(db, p.id, x.visit.id).id}">Continue</button>` : x.status !== 'upcoming' ? `<button class="btn sm ${x.status === 'due' ? 'primary' : ''}" data-action="start-visit" data-pid="${p.id}" data-visit="${x.visit.id}">Start${x.status === 'missed' ? ' (late)' : ''}</button>` : ''}`;
+      return `<div class="row ${x.status}"><div class="who click" data-action="open-participant" data-pid="${p.id}" style="cursor:pointer"><strong>${esc(p.name)}</strong><span class="meta">${esc(pLabel(p))} · ${esc(clusterOf(p).name)}${p.phone ? ' · ' + esc(p.phone) : ''}</span>
+          ${mates.length ? `<span class="meta">${icon('house')} Same household, also due: ${mates.map((m) => esc(m.name)).join(', ')}</span>` : ''}</div>
         <div class="when"><strong>${esc(x.visit.label)}</strong>${esc(RS.windowText(x.status, x.window))}<div class="muted">${esc(RS.rangeText(x.window))}</div></div>
-        <div class="btn-row">${reminded ? '<span class="tag ok">Reminded</span>' : RS.canText(p) && x.status !== 'missed' ? `<button class="btn sm ghost" data-action="remind" data-pid="${p.id}" data-visit="${x.visit.id}">${icon('message')} Remind</button>` : ''}
-          ${x.draft ? `<button class="btn sm primary" data-action="open-rec" data-rec="${RS.draftRec(db, p.id, x.visit.id).id}">Continue</button>` : x.status !== 'upcoming' ? `<button class="btn sm ${x.status === 'due' ? 'primary' : ''}" data-action="start-visit" data-pid="${p.id}" data-visit="${x.visit.id}">Start${x.status === 'missed' ? ' (late)' : ''}</button>` : ''}</div></div>`;
+        <div class="btn-row">${actions}</div></div>`;
     };
     const groups = S.groupBy === 'cluster'
-      ? P.clusters.map((c) => ({ title: c.name, sub: c.arm, items: rows.filter((x) => x.participant.cluster === c.id) })).filter((g) => g.items.length)
+      ? P.clusters.filter((c) => rows.some((x) => x.participant.cluster === c.id)).map((c) => ({ title: c.name, sub: `${c.arm} · ${collectorName(c.id)}`, items: rows.filter((x) => x.participant.cluster === c.id) }))
       : [['missed', 'Window closed', 'Not done in time: doing it now is recorded as a protocol deviation'], ['due', 'Due now', 'Window open today'], ['upcoming', 'Coming up', 'Window opens in the next 30 days']].map(([k, t, sub]) => ({ title: t, sub, tag: k, items: rows.filter((x) => x.status === k) }));
     return `<div class="page">
+      ${isSup() ? filterBar() : ''}
       <div class="btn-row" style="justify-content:space-between;margin-bottom:6px"><div class="tabs" style="margin:0">${[['status', 'By status'], ['cluster', 'By cluster']].map(([k, l]) => `<button class="${S.groupBy === k ? 'on' : ''}" data-action="group-by" data-v="${k}">${l}</button>`).join('')}</div>
-        <span class="muted small">Today ${esc(D.fmtLong(D.today()))}</span></div>
+        <span class="muted small">${isSup() ? 'Read only · ' : `${esc(me().clusters.map((id) => P.clusters.find((c) => c.id === id).name).join(' and '))} · `}Today ${esc(D.fmtLong(D.today()))}</span></div>
       ${groups.map((g) => `<div class="group-head">${g.tag ? `<span class="tag ${g.tag}">${g.items.length}</span>` : `<span class="tag">${g.items.length}</span>`}${esc(g.title)}<span class="muted small" style="font-weight:600">${esc(g.sub)}</span></div>
         <div class="rows">${g.items.map(row).join('') || '<p class="empty">Nothing here.</p>'}</div>`).join('')}
       ${!rows.length ? '<p class="empty">No visits are due in the next 30 days.</p>' : ''}
@@ -614,11 +676,11 @@
   /* Messaging                                                           */
   /* ------------------------------------------------------------------ */
   const dismissKey = (s) => `${s.kind}:${s.key}:${s.participant.id}`;
-  const suggestions = () => RS.suggestMessages(db, P, null, RS.USERS.COLLECTOR.name).filter((s) => db.dismissed[dismissKey(s)] !== D.today() && !(db.dismissed[dismissKey(s)] && s.kind !== 'encouragement'));
+  const suggestions = () => (isSup() ? [] : RS.suggestMessages(db, P, null, me().name).filter((s) => isMine(s.participant) && db.dismissed[dismissKey(s)] !== D.today() && !(db.dismissed[dismissKey(s)] && s.kind !== 'encouragement')));
   function audienceOf(a) {
-    const can = db.participants.filter((p) => p.status === 'enrolled');
+    const can = db.participants.filter((p) => p.status === 'enrolled' && isMine(p));
     let all, label;
-    if (a === 'all') { all = can; label = 'All participants'; }
+    if (a === 'all') { all = can; label = 'All my participants'; }
     else if (a.startsWith('cluster:')) { const c = P.clusters.find((x) => x.id === a.slice(8)); all = can.filter((p) => p.cluster === c.id); label = 'Cluster: ' + c.name; }
     else if (a === 'due7') { all = can.filter((p) => P.visits.some((v) => { const st = RS.visitStatus(db, p, v); return st === 'due' || (st === 'upcoming' && D.between(D.today(), RS.visitWindow(p, v).start) <= 7); })); label = 'Visit due within 7 days'; }
     else { const p = part(a.slice(7)); all = p ? [p] : []; label = p ? pLabel(p) : ''; }
@@ -626,9 +688,13 @@
   }
   function screenMessages() {
     const sug = suggestions();
-    const pending = db.messages.filter((m) => m.status === 'pending');
-    const sent = db.messages.filter((m) => m.status === 'sent').sort((a, b) => b.sentAt.localeCompare(a.sentAt));
-    const tabs = [['suggested', `Suggested (${sug.length})`], ['compose', 'Write a message'], ['pending', `Waiting for approval (${pending.length})`], ['sent', 'Sent']];
+    const mine = (m) => isSup() || m.createdBy === me().name || m.recipients.some((r) => isMine(part(r.participantId)));
+    const pending = db.messages.filter((m) => (m.status === 'pending' || (m.status === 'returned' && !isSup())) && mine(m));
+    const sent = db.messages.filter((m) => m.status === 'sent' && mine(m)).sort((a, b) => b.sentAt.localeCompare(a.sentAt));
+    const tabs = isSup()
+      ? [['pending', `Waiting for approval (${pending.length})`], ['sent', 'Sent']]
+      : [['suggested', `Suggested (${sug.length})`], ['compose', 'Write a message'], ['pending', `Waiting for approval (${pending.length})`], ['sent', 'Sent']];
+    if (!tabs.some(([k]) => k === S.msgTab)) S.msgTab = tabs[0][0];
     let body = '';
     if (S.msgTab === 'suggested') {
       body = `<p class="muted small">Drafted from the schedule and the protocol's message rules. Only people who agreed to be contacted (consent: "${esc(P.consent.options.find((o) => o.id === P.messages.consentOption).text)}") and have a phone are included. Check each one before sending.</p>
@@ -640,13 +706,13 @@
       const aud = audienceOf(c.audience);
       const preview = aud.ok[0] ? RS.fillMessage(c.text, RS.messageVars(P, aud.ok[0], null, me().name)) : c.text;
       const n = RS.smsParts(preview);
-      const needsApproval = aud.group && !isSup();
+      const needsApproval = aud.group;
       body = `<div class="card"><div class="form-grid">
           <label><span class="lbl">To</span><select class="input" data-change="compose" data-k="audience">
-            <option value="all" ${c.audience === 'all' ? 'selected' : ''}>All participants</option>
-            ${P.clusters.map((x) => `<option value="cluster:${x.id}" ${c.audience === 'cluster:' + x.id ? 'selected' : ''}>Cluster: ${esc(x.name)}</option>`).join('')}
+            <option value="all" ${c.audience === 'all' ? 'selected' : ''}>All my participants</option>
+            ${P.clusters.filter((x) => myClusters().includes(x.id)).map((x) => `<option value="cluster:${x.id}" ${c.audience === 'cluster:' + x.id ? 'selected' : ''}>Cluster: ${esc(x.name)}</option>`).join('')}
             <option value="due7" ${c.audience === 'due7' ? 'selected' : ''}>Visit due within 7 days</option>
-            <optgroup label="One person">${db.participants.filter((p) => p.status === 'enrolled').map((p) => `<option value="person:${p.id}" ${c.audience === 'person:' + p.id ? 'selected' : ''}>${esc(pLabel(p))} · ${esc(p.name)}</option>`).join('')}</optgroup></select></label>
+            <optgroup label="One person">${db.participants.filter((p) => p.status === 'enrolled' && isMine(p)).map((p) => `<option value="person:${p.id}" ${c.audience === 'person:' + p.id ? 'selected' : ''}>${esc(pLabel(p))} · ${esc(p.name)}</option>`).join('')}</optgroup></select></label>
           <label><span class="lbl">Start from</span><select class="input" data-change="compose" data-k="template">${Object.entries(P.messages.templates).map(([k, t]) => `<option value="${k}" ${c.template === k ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}</select></label>
         </div>
         <label style="display:block;margin-top:12px"><span class="lbl">Message</span><textarea class="input" id="compose-text" data-input="compose-text">${esc(c.text)}</textarea></label>
@@ -657,9 +723,9 @@
         <div class="btn-row end"><button class="btn primary" data-action="compose-send" ${aud.ok.length && !/\[[^\]]+\]/.test(c.text) && c.text.trim() ? '' : 'disabled'}>${icon('send')} ${needsApproval ? 'Send for approval' : 'Send'}</button></div>
         ${needsApproval ? '<p class="small muted">Group messages are checked by the supervisor before they go out.</p>' : ''}</div>`;
     } else if (S.msgTab === 'pending') {
-      body = `<div class="rows">${pending.map((m) => `<div class="msg"><div class="msg-head"><span><span class="tag pending">Waiting</span> <b>${esc(m.audience)}</b> · ${m.recipients.length} recipients</span><span class="small muted">Written by ${esc(m.createdBy)} ${esc(fmtDT(m.createdAt))}</span></div>
+      body = `${isSup() ? '<p class="small muted">Group messages written by data collectors. Approving releases them to be sent; it does not send anything from this view.</p>' : ''}<div class="rows">${pending.map((m) => `<div class="msg"><div class="msg-head"><span><span class="tag ${m.status === 'returned' ? 'missed' : 'pending'}">${m.status === 'returned' ? 'Sent back' : 'Waiting'}</span> <b>${esc(m.audience)}</b> · ${m.recipients.length} recipients</span><span class="small muted">Written by ${esc(m.createdBy)} ${esc(fmtDT(m.createdAt))}</span></div>
         <div class="text">${esc(m.recipients[0] ? m.recipients[0].text : '')}</div>
-        ${isSup() ? `<div class="btn-row end"><button class="btn sm ghost" data-action="msg-reject" data-m="${m.id}">Send back</button><button class="btn sm primary" data-action="msg-approve" data-m="${m.id}">${icon('check')} Approve and send</button></div>` : '<p class="small muted">The supervisor will approve or send it back.</p>'}</div>`).join('') || '<p class="empty">Nothing waiting.</p>'}</div>`;
+        ${isSup() ? `<div class="btn-row end"><button class="btn sm ghost" data-action="msg-reject" data-m="${m.id}">Send back</button><button class="btn sm primary" data-action="msg-approve" data-m="${m.id}">${icon('check')} Approve</button></div>` : m.status === 'returned' ? '<p class="small muted">The supervisor sent this back. Write a new message if it is still needed.</p>' : '<p class="small muted">The supervisor will approve or send it back.</p>'}</div>`).join('') || '<p class="empty">Nothing waiting.</p>'}</div>`;
     } else {
       body = `<div class="rows">${sent.map((m) => `<details class="msg"><summary class="msg-head" style="cursor:pointer"><span><span class="tag">${esc(m.kind)}</span> <b>${esc(m.audience)}</b> · ${m.recipients.length} recipient${m.recipients.length === 1 ? '' : 's'}</span><span class="small muted">${esc(fmtDT(m.sentAt))} · ${esc(m.sentBy)}</span></summary>
         ${m.recipients.map((r) => `<div class="small"><b>${esc(pLabel(part(r.participantId)))}</b> ${esc(r.phone)}<div class="text">${esc(r.text)}</div></div>`).join('')}</details>`).join('') || '<p class="empty">Nothing sent yet.</p>'}</div>`;
@@ -678,45 +744,251 @@
   /* ------------------------------------------------------------------ */
   /* Data review (supervisor)                                            */
   /* ------------------------------------------------------------------ */
-  function screenReview() {
-    const ps = db.participants;
-    const enrolled = ps.filter((p) => p.status === 'enrolled' || p.status === 'withdrawn' || p.status === 'completed');
-    const done = db.visits.filter((r) => r.status === 'complete' && r.visit !== 'baseline');
-    const onTime = done.filter((r) => { const w = RS.visitWindow(part(r.participantId), visitDef(r.visit)); return r.date >= w.start && r.date <= w.end; });
-    const missed = ps.filter((p) => p.status === 'enrolled').reduce((n, p) => n + P.visits.filter((v) => RS.visitStatus(db, p, v) === 'missed').length, 0);
-    const toReview = db.visits.filter((r) => r.status === 'complete' && !r.reviewed);
-    const qOpen = db.queries.filter((q) => q.status !== 'closed');
-    const evNew = db.events.filter((e) => e.status === 'new');
-    // completeness: required fields with a value (not a missing reason) across completed visits
-    let need = 0, have = 0;
-    db.visits.filter((r) => r.status === 'complete').forEach((r) => RS.visitSections(P, visitDef(r.visit), r.values, ctxOf(r)).forEach((s) => s.fields.forEach((f) => { if (f.required) { need++; if (r.values[f.id] != null && r.values[f.id] !== '') have++; } })));
-    const kpi = (n, l, cls) => `<div class="kpi ${cls || ''}"><strong>${n}</strong><span>${l}</span></div>`;
-    const tabs = [['queries', `Queries (${qOpen.length})`], ['visits', `Visits to review (${toReview.length})`], ['events', `Safety events (${db.events.length})`], ['export', 'Export'], ['audit', 'Audit trail']];
+  /* ------------------------------------------------------------------ */
+  /* Supervisor: filter bar (cluster, data collector)                    */
+  /* ------------------------------------------------------------------ */
+  function filterBar(extra) {
+    return `<div class="filters">
+      <label><span class="lbl">Cluster</span><select class="input sm" data-change="filter" data-k="cluster"><option value="all">All clusters</option>${P.clusters.map((c) => `<option value="${c.id}" ${S.f.cluster === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+      <label><span class="lbl">Data collector</span><select class="input sm" data-change="filter" data-k="collector"><option value="all">All data collectors</option>${RS.STAFF.collectors.map((c) => `<option value="${c.id}" ${S.f.collector === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+      ${extra || ''}
+    </div>`;
+  }
+  const pct = (x) => (x == null ? '—' : Math.round(x * 100) + '%');
+
+  /* ------------------------------------------------------------------ */
+  /* Data quality review: missing data, safety, queries, follow-up        */
+  /* ------------------------------------------------------------------ */
+  function screenQuality() {
+    const ps = db.participants.filter(inScope);
+    const ids = new Set(ps.map((p) => p.id));
+    const recs = db.visits.filter((r) => ids.has(r.participantId));
+    const perf = RS.performance(db, P, ps);
+    const toReview = recs.filter((r) => r.status === 'complete' && !r.reviewed);
+    const qOpen = db.queries.filter((q) => ids.has(q.participantId) && q.status !== 'closed');
+    const evs = db.events.filter((e) => ids.has(e.participantId));
+    const evNew = evs.filter((e) => e.status === 'new');
+    const refs = db.referrals.filter((x) => ids.has(x.participantId));
+    const refsOpen = refs.filter((x) => x.status === 'open');
+    const kpi = (n, l, cls, sub) => `<div class="kpi ${cls || ''}"><strong>${n}</strong><span>${l}</span>${sub ? `<em>${sub}</em>` : ''}</div>`;
+    const tabs = [['overview', 'By collector and cluster'], ['queries', `Queries (${qOpen.length})`], ['visits', `Visits to review (${toReview.length})`], ['events', `Safety events (${evNew.length} new)`], ['referrals', `Referrals (${refsOpen.length} open)`], ['export', 'Export'], ['audit', 'Audit trail']];
     let body = '';
-    if (S.reviewTab === 'queries') {
-      body = qOpen.map((q) => { const p = part(q.participantId), r = rec(q.visitRecId); return `<div class="card"><div class="card-head"><h3><button class="btn link" data-action="open-rec" data-rec="${r.id}">${esc(pLabel(p))} · ${esc(visitDef(r.visit).label)} · ${esc((P.fields[q.field] || {}).label || q.field)}</button></h3><span>Value: <b>${esc(fmtValue(P.fields[q.field], r.values[q.field]))}</b></span></div>${queryHtml(q)}</div>`; }).join('') || '<p class="empty">No open queries.</p>';
+    if (S.reviewTab === 'overview') {
+      const row = (label, sub, parts) => {
+        const m = RS.performance(db, P, parts);
+        const warn = (x, lo) => (x != null && x < lo ? 'warn-cell' : '');
+        return `<tr><td><b>${esc(label)}</b>${sub ? `<div class="small muted">${esc(sub)}</div>` : ''}</td><td class="num">${m.enrolled}</td>
+          <td class="num ${warn(m.followUpRate, 0.85)}">${pct(m.followUpRate)}<div class="small muted">${m.visitsDone}/${m.visitsDue}</div></td>
+          <td class="num ${warn(m.inWindowRate, 0.8)}">${pct(m.inWindowRate)}</td><td class="num ${m.visitsMissed ? 'warn-cell' : ''}">${m.visitsMissed}</td><td class="num">${m.openNow}</td>
+          <td class="num ${warn(m.completeness, 0.95)}">${pct(m.completeness)}</td><td class="num">${m.queriesOpen}</td>
+          <td class="num">${m.flagged}</td><td class="num">${m.referrals}</td><td class="num ${warn(m.referralCompletion, 0.7)}">${pct(m.referralCompletion)}</td><td class="num">${m.withdrawn}</td>
+          <td class="small">${m.lastVisit ? esc(D.fmt(m.lastVisit)) : '—'}</td></tr>`;
+      };
+      const head = '<thead><tr><th></th><th class="num">Enrolled</th><th class="num">Follow-ups done</th><th class="num">In window</th><th class="num">Missed</th><th class="num">Due now</th><th class="num">Data complete</th><th class="num">Open queries</th><th class="num">Visits flagged</th><th class="num">Referrals</th><th class="num">Referral seen</th><th class="num">Withdrawn</th><th>Last visit</th></tr></thead>';
+      const cols = RS.STAFF.collectors.filter((c) => S.f.collector === 'all' || c.id === S.f.collector);
+      body = `<p class="small muted">Follow-ups count visits whose window has closed. "Visits flagged" are visits where a safety rule asked for a referral or review. Amber: below the usual target (follow-up 85%, in window 80%, data complete 95%, referral seen 70%). These targets are suggestions, not from the protocol.</p>
+        <div class="card tbl-wrap"><h3>By data collector</h3><table class="tbl perf">${head}<tbody>${cols.map((c) => row(c.name, c.clusters.map((id) => P.clusters.find((x) => x.id === id).name).join(', '), ps.filter((p) => c.clusters.includes(p.cluster)))).join('')}</tbody></table></div>
+        <div class="card tbl-wrap"><h3>By cluster</h3><table class="tbl perf">${head}<tbody>${P.clusters.filter((c) => ps.some((p) => p.cluster === c.id)).map((c) => row(c.name, `${c.arm} · ${collectorName(c.id)}`, ps.filter((p) => p.cluster === c.id))).join('')}</tbody></table></div>
+        ${missedList(ps)}`;
+    } else if (S.reviewTab === 'queries') {
+      body = qOpen.map((q) => { const p = part(q.participantId), r = rec(q.visitRecId); return `<div class="card"><div class="card-head"><h3><button class="btn link" data-action="open-rec" data-rec="${r.id}">${esc(pLabel(p))} · ${esc(visitDef(r.visit).label)} · ${esc((P.fields[q.field] || {}).label || q.field)}</button></h3><span>Value: <b>${esc(fmtValue(P.fields[q.field], r.values[q.field]))}</b> · ${esc(r.collector)}</span></div>${queryHtml(q)}</div>`; }).join('') || '<p class="empty">No open queries.</p>';
     } else if (S.reviewTab === 'visits') {
       body = `<div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Participant</th><th>Visit</th><th>Collector</th><th>Flags</th><th></th></tr></thead><tbody>${toReview.sort((a, b) => b.date.localeCompare(a.date)).map((r) => { const p = part(r.participantId); const nq = db.queries.filter((q) => q.visitRecId === r.id && q.status !== 'closed').length; return `<tr class="click" data-action="open-rec" data-rec="${r.id}"><td>${esc(D.fmt(r.date))}</td><td><b>${esc(pLabel(p))}</b> ${esc(p.name)}</td><td>${esc(visitDef(r.visit).label)}${r.deviation ? ' <span class="tag missed">Deviation</span>' : ''}</td><td>${esc(r.collector)}</td><td>${(r.safety || []).map((s) => `<span class="tag ${s.level}">${esc(LEVEL[s.level])}</span>`).join(' ')}${nq ? ` <span class="tag warn">${nq} query</span>` : ''}</td><td><button class="btn sm">Review</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">All visits reviewed.</td></tr>'}</tbody></table></div>`;
     } else if (S.reviewTab === 'events') {
-      body = `<p class="small muted">Reportable events (protocol §15): serious adverse events and urgent referrals triggered by study procedures. Assess each and include it in the DSMB safety summary.</p>${db.events.slice().sort((a, b) => b.reportedAt.localeCompare(a.reportedAt)).map(eventHtml).join('') || '<p class="empty">No events.</p>'}`;
+      body = `<p class="small muted">Reportable events (protocol §15): serious adverse events and urgent referrals triggered by study procedures. Assess each and include it in the DSMB safety summary.</p>${evs.slice().sort((a, b) => (a.status === 'new' ? -1 : 0) - (b.status === 'new' ? -1 : 0) || b.reportedAt.localeCompare(a.reportedAt)).map(eventHtml).join('') || '<p class="empty">No events.</p>'}`;
+    } else if (S.reviewTab === 'referrals') {
+      const closed = refs.filter((x) => x.status !== 'open');
+      body = `<div class="kpis">${kpi(refs.length, 'Referrals made')}${kpi(refsOpen.length, 'Waiting for outcome', refsOpen.some((x) => D.between(x.createdAt.slice(0, 10), D.today()) > 14) ? 'warn' : '')}${kpi(pct(closed.length ? refs.filter((x) => x.status === 'seen').length / closed.length : null), 'Seen (of those with an outcome)')}${kpi(refs.filter((x) => x.status === 'not_attended').length, 'Did not go', '', 'reasons below')}</div>
+        <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Participant</th><th>To</th><th>Why</th><th>Status</th><th>Collector</th><th></th></tr></thead><tbody>
+        ${refs.slice().sort((a, b) => (a.status === 'open' ? -1 : 1) - (b.status === 'open' ? -1 : 1) || b.createdAt.localeCompare(a.createdAt)).map((x) => { const p = part(x.participantId); const [st, tone] = REF_STATUS[x.status]; const days = D.between(x.createdAt.slice(0, 10), D.today()); return `<tr><td>${esc(D.fmt(x.createdAt.slice(0, 10)))}</td><td><button class="btn link" data-action="open-participant" data-pid="${p.id}">${esc(pLabel(p))}</button> ${esc(p.name)}</td><td>${esc(RS.referralSite(P, x.to).name)}<div class="small"><span class="tag ${x.urgency === 'urgent' ? 'urgent' : 'soon'}">${x.urgency === 'urgent' ? 'Urgent' : 'Within a week'}</span></div></td><td class="small">${x.reasons.map((y) => esc(y.text.split(':')[0])).join('; ')}</td><td><span class="tag ${tone}">${st}</span>${x.status === 'open' && days > 7 ? `<div class="small muted">${days} days</div>` : ''}${x.outcome && x.outcome.text ? `<div class="small muted">${esc(x.outcome.text)}</div>` : ''}</td><td class="small">${esc(x.by)}</td><td><button class="btn sm ghost" data-action="view-handoff" data-ref="${x.id}">${icon('printer')}</button></td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">No referrals.</td></tr>'}</tbody></table></div>`;
     } else if (S.reviewTab === 'export') {
-      body = `<div class="card"><h3>Export for the data centre</h3><p class="small muted">Study IDs only: no names, phone numbers or addresses. One row per completed visit; every protocol field, its missing-data reason, and the calculated values. Open queries are counted per row.</p>
+      body = `<div class="card"><h3>Export for the data centre</h3><p class="small muted">Study IDs and household IDs only: no names, phone numbers or addresses. One row per completed visit; every protocol field, its missing-data reason, and the calculated values. Open queries are counted per row. Exports cover all clusters, whatever the filter.</p>
         <div class="btn-row"><button class="btn" data-action="export" data-k="visits">${icon('download')} Visits (CSV)</button><button class="btn" data-action="export" data-k="participants">${icon('download')} Participants and consent (CSV)</button><button class="btn" data-action="export" data-k="audit">${icon('download')} Audit trail (CSV)</button></div></div>`;
     } else {
-      body = `<div class="card tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>Who</th><th>Change</th><th>Reason</th></tr></thead><tbody>${db.audit.slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 60).map(auditRow).join('') || '<tr><td colspan="4" class="empty">No changes yet.</td></tr>'}</tbody></table></div>`;
+      body = `<div class="card tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>Who</th><th>Change</th><th>Reason</th></tr></thead><tbody>${db.audit.filter((a) => !a.participantId || ids.has(a.participantId)).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 60).map(auditRow).join('') || '<tr><td colspan="4" class="empty">No changes yet.</td></tr>'}</tbody></table></div>`;
     }
-    return `<div class="page">
+    return `<div class="page wide">${filterBar()}
       <div class="kpis">
-        ${kpi(`${enrolled.length}<span class="muted" style="font-size:14px"> / ${P.target}</span>`, 'Enrolled (target)')}
+        ${kpi(`${perf.enrolled}<span class="muted" style="font-size:14px"> / ${P.target}</span>`, 'Enrolled (target)')}
         ${kpi(ps.length, 'Screened')}${kpi(ps.filter((p) => p.status === 'screen_fail' || p.status === 'declined').length, 'Not enrolled')}
-        ${kpi(ps.filter((p) => p.status === 'withdrawn').length, 'Withdrawn')}
-        ${kpi(done.length ? Math.round((onTime.length / done.length) * 100) + '%' : '—', 'Follow-ups in window', done.length && onTime.length / done.length < 0.9 ? 'warn' : '')}
-        ${kpi(missed, 'Missed visits', missed ? 'warn' : '')}
-        ${kpi(need ? Math.round((have / need) * 100) + '%' : '—', 'Required data complete')}
+        ${kpi(perf.withdrawn, 'Withdrawn')}
+        ${kpi(pct(perf.followUpRate), 'Follow-ups done', perf.followUpRate != null && perf.followUpRate < 0.85 ? 'warn' : '', `${perf.visitsMissed} missed`)}
+        ${kpi(pct(perf.inWindowRate), 'Done in window', perf.inWindowRate != null && perf.inWindowRate < 0.8 ? 'warn' : '')}
+        ${kpi(pct(perf.completeness), 'Required data complete')}
         ${kpi(qOpen.length, 'Open queries', qOpen.length ? 'warn' : '')}
         ${kpi(evNew.length, 'Events to assess', evNew.length ? 'bad' : '')}
+        ${kpi(refsOpen.length, 'Referrals open', '', `${refs.length} made`)}
       </div>
       <div class="tabs">${tabs.map(([k, l]) => `<button class="${S.reviewTab === k ? 'on' : ''}" data-action="review-tab" data-v="${k}">${l}</button>`).join('')}</div>${body}</div>`;
+  }
+  /** Missed follow-up visits (window closed, not done), most recent first. */
+  function missedList(ps) {
+    const rows = [];
+    ps.filter((p) => p.status === 'enrolled').forEach((p) => P.visits.forEach((v) => { if (RS.visitStatus(db, p, v) === 'missed') rows.push({ p, v, w: RS.visitWindow(p, v) }); }));
+    if (!rows.length) return '';
+    rows.sort((a, b) => b.w.end.localeCompare(a.w.end));
+    return `<div class="card tbl-wrap"><h3>Missed visits (${rows.length})</h3><table class="tbl"><thead><tr><th>Participant</th><th>Visit</th><th>Window closed</th><th>Cluster</th><th>Collector</th><th>Reminder sent</th></tr></thead><tbody>
+      ${rows.slice(0, 25).map(({ p, v, w }) => `<tr><td><button class="btn link" data-action="open-participant" data-pid="${p.id}">${esc(pLabel(p))}</button> ${esc(p.name)}</td><td>${esc(v.label)}</td><td>${esc(D.fmt(w.end))}</td><td>${esc(clusterOf(p).name)}</td><td>${esc(collectorName(p.cluster))}</td><td>${db.messages.some((m) => m.status === 'sent' && m.kind === 'reminder' && m.key === `${p.id}:${v.id}`) ? 'Yes' : RS.canText(p) ? 'No' : 'No (no contact consent or phone)'}</td></tr>`).join('')}</tbody></table>
+      ${rows.length > 25 ? `<p class="small muted">Showing the latest 25.</p>` : ''}</div>`;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Analysis: enrolment and outcomes over time, by arm or cluster        */
+  /* ------------------------------------------------------------------ */
+  // Categorical series colours, fixed order (validated palette: blue, orange, aqua, yellow). Colour follows the
+  // entity (cluster order in the protocol; arms in order of first appearance), never its rank.
+  const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100'];
+  const ARMS = () => [...new Set(P.clusters.map((c) => c.arm))];
+  function analysisGroups(cohort) {
+    const enrolled = db.participants.filter((p) => p.enrolledAt && inScope(p) && RS.inCohort(P, p, cohort));
+    if (S.an.split === 'arm') return ARMS().map((a, i) => ({ key: a, label: a, color: SERIES[i], parts: enrolled.filter((p) => clusterOf(p).arm === a) })).filter((g) => P.clusters.some((c) => c.arm === g.key && (S.f.cluster === 'all' || c.id === S.f.cluster)));
+    return P.clusters.map((c, i) => ({ key: c.id, label: c.name, color: SERIES[i], parts: enrolled.filter((p) => p.cluster === c.id) })).filter((g) => (S.f.cluster === 'all' || g.key === S.f.cluster) && (S.f.collector === 'all' || (RS.STAFF.collectors.find((x) => x.id === S.f.collector) || { clusters: [] }).clusters.includes(g.key)));
+  }
+  const fmtNum = (x, dec) => (x == null ? '—' : (Math.round(x * 10 ** (dec || 0)) / 10 ** (dec || 0)).toLocaleString(undefined, { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 }));
+
+  const MIN_N = 3; // chart points from fewer people are hidden (they swing too much to read)
+  function screenAnalysis() {
+    const A = P.analysis;
+    const m = A.measures.find((x) => x.id === S.an.measure) || A.measures[0];
+    const allGroups = analysisGroups(null);
+    // Enrolment over time
+    const en = RS.enrolmentSeries(allGroups);
+    const monthLabel = (k) => new Date(k + '-01T00:00:00').toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+    const enChart = lineChart('enrol', { x: en.months.map(monthLabel), series: en.series.map((s, i) => ({ label: s.label, color: allGroups[i].color, values: s.counts })), unit: 'enrolled', dec: 0, zero: true });
+    // Outcome by visit
+    const groups = analysisGroups(m.cohort);
+    const os = RS.outcomeSeries(db, P, m, groups);
+    const isPct = m.kind === 'percent';
+    const scale = isPct ? 100 : 1;
+    const dec = isPct ? 0 : m.decimals || 0;
+    const visitLabel = (id) => (id === 'baseline' ? 'Baseline' : visitDef(id).label.replace(' (final)', ''));
+    const outChart = lineChart('outcome', {
+      x: os.visits.map(visitLabel),
+      series: os.series.map((s, i) => ({ label: s.label, color: groups[i].color, values: os.visits.map((v) => (s.points[v] && s.points[v].n >= MIN_N ? s.points[v].mean * scale : null)), ns: os.visits.map((v) => (s.points[v] ? s.points[v].n : 0)) })),
+      unit: isPct ? '%' : m.unit, dec, zero: isPct,
+    });
+    const better = (d) => (d == null || Math.abs(d) < 1e-9 ? '' : (d < 0) === (m.better === 'lower') ? 'better' : 'worse');
+    const cohortName = m.cohort ? (P.derivedById[m.cohort] || {}).label : 'All enrolled';
+    const enTable = allGroups.map((g) => { const perf = RS.performance(db, P, g.parts); return `<tr><td><span class="key" style="background:${g.color}"></span>${esc(g.label)}</td><td class="num">${g.parts.length}</td><td class="num">${g.parts.filter((p) => p.status === 'withdrawn').length}</td><td class="num">${pct(perf.followUpRate)}</td><td class="num">${pct(perf.inWindowRate)}</td></tr>`; }).join('');
+    return `<div class="page wide">
+      ${filterBar(`<label><span class="lbl">Split by</span><select class="input sm" data-change="an" data-k="split"><option value="cluster" ${S.an.split === 'cluster' ? 'selected' : ''}>Cluster</option><option value="arm" ${S.an.split === 'arm' ? 'selected' : ''}>Arm (intervention / standard care)</option></select></label>`)}
+      <div class="alert warn" style="margin-bottom:14px">${icon('alert')}<div><strong>For running the study, not for conclusions</strong>${esc(A.note)}</div></div>
+      <div class="grid-2 an-grid">
+        <div class="card"><div class="card-head"><h3>Enrolment over time</h3><span class="small muted">Cumulative, by month</span></div>${enChart}
+          <table class="tbl compact"><thead><tr><th></th><th class="num">Enrolled</th><th class="num">Withdrawn</th><th class="num">Follow-ups done</th><th class="num">In window</th></tr></thead><tbody>${enTable}</tbody></table></div>
+        <div class="card"><div class="card-head"><h3>${esc(m.label)} by visit</h3><span class="small muted">${isPct ? '% of people' : 'Mean' + (m.unit ? ', ' + esc(m.unit) : '')} · ${esc(cohortName)}</span></div>
+          <div class="chips measure-chips">${A.measures.map((x) => `<button class="chip ${x.id === m.id ? 'on' : ''}" data-action="an-measure" data-v="${x.id}">${esc(x.label)}</button>`).join('')}</div>
+          ${os.visits.length ? outChart : '<p class="empty">No data for this measure yet.</p>'}
+          <table class="tbl compact"><thead><tr><th></th><th class="num">Baseline</th><th class="num">Latest visit</th><th class="num">Change from baseline</th></tr></thead><tbody>
+          ${os.series.map((s, i) => {
+            const vs = os.visits.filter((v) => s.points[v]);
+            // latest visit with at least 3 people (a single person's value says little)
+            const lastId = vs.slice(1).reverse().find((v) => s.points[v].n >= 3) || (vs.length > 1 ? vs[vs.length - 1] : null);
+            const b = s.points.baseline, last = lastId ? s.points[lastId] : null;
+            const ch = s.change.mean == null ? null : s.change.mean * scale;
+            return `<tr><td><span class="key" style="background:${groups[i].color}"></span>${esc(s.label)}</td><td class="num">${b ? fmtNum(b.mean * scale, dec) + (isPct ? '%' : '') : '—'}<div class="small muted">n=${b ? b.n : 0}</div></td>
+              <td class="num">${last ? fmtNum(last.mean * scale, dec) + (isPct ? '%' : '') : '—'}<div class="small muted">${last ? `${esc(visitLabel(lastId))}, n=${last.n}` : ''}</div></td>
+              <td class="num"><span class="delta ${better(ch)}">${ch == null ? '—' : (ch > 0 ? '+' : ch < 0 ? '−' : '') + fmtNum(Math.abs(ch), isPct ? 0 : Math.max(dec, 1)) + (isPct ? ' points' : '')}</span><div class="small muted">n=${s.change.n} with both</div></td></tr>`;
+          }).join('')}</tbody></table>
+          <p class="small muted">Points with fewer than ${MIN_N} people are left off the chart. Change from baseline is within each person (their latest visit minus their baseline), so it isn't skewed by who has reached later visits. Small numbers move a lot: read with the n.</p>
+        </div>
+      </div>
+      ${adherenceCard(groups.length ? analysisGroups(null) : [])}
+    </div>`;
+  }
+  /** Medicines and adherence at each group's latest visits: who is struggling, where. */
+  function adherenceCard(groups) {
+    const latest = (p) => RS.latestValues(db, p.id);
+    const rows = groups.map((g) => {
+      const vals = g.parts.filter((p) => p.status === 'enrolled').map(latest);
+      const onMeds = vals.filter((v) => v.on_htn_meds === 'yes' || v.on_dm_meds === 'yes' || v.on_insulin === 'yes');
+      const share = (list, f) => (list.length ? list.filter(f).length / list.length : null);
+      const mars = onMeds.map((v) => [1, 2, 3, 4, 5].reduce((s, i) => s + Number(v['mars_' + i] || 0), 0)).filter((x) => x >= 5);
+      return `<tr><td><span class="key" style="background:${g.color}"></span>${esc(g.label)}</td><td class="num">${onMeds.length}</td><td class="num">${mars.length ? fmtNum(mars.reduce((s, x) => s + x, 0) / mars.length, 1) : '—'}</td>
+        <td class="num">${pct(share(onMeds, (v) => [1, 2, 3, 4, 5].some((i) => Number(v['mars_' + i]) <= 3)))}</td><td class="num">${pct(share(vals, (v) => v.med_access === 'yes'))}</td>
+        <td class="num">${pct(share(vals.filter((v) => v.food_security), (v) => v.food_security === 'moderate' || v.food_security === 'severe'))}</td></tr>`;
+    }).join('');
+    return `<div class="card tbl-wrap"><div class="card-head"><h3>Medicines and adherence (latest recorded)</h3><span class="small muted">Ideas for support: reminders, refill problems, cost</span></div>
+      <table class="tbl compact"><thead><tr><th></th><th class="num">On BP or diabetes medicine</th><th class="num">MARS-5 mean (5–25)</th><th class="num">Any MARS-5 item ≤ 3 (often misses)</th><th class="num">Couldn't get a medicine</th><th class="num">Food insecure (moderate or severe)</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="small muted">Where many people couldn't get a medicine, the barrier is supply or cost rather than remembering; reminders help with the "often misses" group. Encouragement messages for people on medicine are drafted automatically in Messaging.</p></div>`;
+  }
+
+  /* ---------- Line chart (inline SVG with a hover crosshair) ---------- */
+  const CHARTS = {};
+  function niceTicks(lo, hi, n) {
+    const span = hi - lo || 1;
+    const step0 = span / n, mag = 10 ** Math.floor(Math.log10(step0));
+    const step = [1, 2, 2.5, 5, 10].map((k) => k * mag).find((s) => span / s <= n) || 10 * mag;
+    const a = Math.floor(lo / step) * step, b = Math.ceil(hi / step) * step;
+    const out = [];
+    for (let v = a; v <= b + step / 2; v += step) out.push(Math.round(v * 1000) / 1000);
+    return out;
+  }
+  /**
+   * opts: {x: [labels], series: [{label, color, values: [number|null], ns?: [n]}], unit, dec, zero}
+   * Legend above (line keys), 2px lines, 8px markers with a surface ring, hairline grid, hover crosshair + tooltip.
+   */
+  function lineChart(id, o) {
+    CHARTS[id] = o;
+    const W = 560, H = 230, pad = { l: 44, r: 14, t: 12, b: 28 };
+    const vals = o.series.flatMap((s) => s.values).filter((v) => v != null);
+    if (!vals.length || !o.x.length) return '<p class="empty">No data yet.</p>';
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    if (o.zero) lo = Math.min(0, lo);
+    if (hi - lo < 1e-9) { hi += 1; lo -= o.zero ? 0 : 1; }
+    const ticks = niceTicks(lo, hi, 4);
+    lo = ticks[0]; hi = ticks[ticks.length - 1];
+    const X = (i) => pad.l + (o.x.length === 1 ? (W - pad.l - pad.r) / 2 : (i * (W - pad.l - pad.r)) / (o.x.length - 1));
+    const Y = (v) => pad.t + ((hi - v) * (H - pad.t - pad.b)) / (hi - lo);
+    const every = Math.ceil(o.x.length / 8);
+    const path = (s) => {
+      let d = '', pen = false;
+      s.values.forEach((v, i) => { if (v == null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`; pen = true; });
+      return d;
+    };
+    const dots = o.x.length <= 12;
+    return `<div class="chart" data-chart="${id}">
+      ${o.series.length > 1 ? `<div class="legend">${o.series.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.label)}</span>`).join('')}</div>` : ''}
+      <div class="chart-box"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.series.map((s) => s.label).join(', '))}">
+        ${ticks.map((t) => `<line class="grid" x1="${pad.l}" x2="${W - pad.r}" y1="${Y(t)}" y2="${Y(t)}"/><text class="tick" x="${pad.l - 6}" y="${Y(t) + 4}" text-anchor="end">${esc(fmtNum(t, Number.isInteger(t) ? 0 : 1))}</text>`).join('')}
+        ${o.x.map((l, i) => (i % every === 0 || i === o.x.length - 1 ? `<text class="tick" x="${X(i)}" y="${H - 8}" text-anchor="middle">${esc(l)}</text>` : '')).join('')}
+        ${o.series.map((s) => `<path d="${path(s)}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`).join('')}
+        ${dots ? o.series.map((s) => s.values.map((v, i) => (v == null ? '' : `<circle cx="${X(i)}" cy="${Y(v)}" r="4" fill="${s.color}" stroke="var(--surface)" stroke-width="2"/>`)).join('')).join('') : ''}
+        <line class="crosshair hidden" x1="0" x2="0" y1="${pad.t}" y2="${H - pad.b}"/>
+        <rect class="hit" x="${pad.l}" y="${pad.t}" width="${W - pad.l - pad.r}" height="${H - pad.t - pad.b}" fill="transparent" data-w="${W}" data-l="${pad.l}" data-r="${pad.r}"/>
+      </svg><div class="tip hidden" role="tooltip"></div></div></div>`;
+  }
+  /** Hover: snap to the nearest x, show every series' value there. */
+  function chartHover(e) {
+    const box = e.target.closest('.chart');
+    if (!box) return;
+    const o = CHARTS[box.dataset.chart];
+    const svg = box.querySelector('svg'), hit = svg.querySelector('.hit'), tip = box.querySelector('.tip'), cross = svg.querySelector('.crosshair');
+    const r = svg.getBoundingClientRect();
+    const W = Number(hit.dataset.w), l = Number(hit.dataset.l), rr = Number(hit.dataset.r);
+    const sx = ((e.clientX - r.left) / r.width) * W;
+    const n = o.x.length;
+    const i = n === 1 ? 0 : Math.max(0, Math.min(n - 1, Math.round(((sx - l) / (W - l - rr)) * (n - 1))));
+    const cx = l + (n === 1 ? (W - l - rr) / 2 : (i * (W - l - rr)) / (n - 1));
+    cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.classList.remove('hidden');
+    tip.textContent = '';
+    const h = document.createElement('div'); h.className = 'tip-head'; h.textContent = o.x[i]; tip.appendChild(h);
+    o.series.forEach((s) => {
+      const row = document.createElement('div'); row.className = 'tip-row';
+      const k = document.createElement('i'); k.style.background = s.color; row.appendChild(k);
+      const v = document.createElement('b'); v.textContent = s.values[i] == null ? '—' : fmtNum(s.values[i], o.dec) + (o.unit === '%' ? '%' : ''); row.appendChild(v);
+      const lab = document.createElement('span'); lab.textContent = ` ${s.label}${s.ns && s.values[i] != null ? ` (n=${s.ns[i]})` : ''}`; row.appendChild(lab);
+      tip.appendChild(row);
+    });
+    tip.classList.remove('hidden');
+    const px = ((cx / W) * r.width);
+    tip.style.left = Math.min(Math.max(0, px + 12), r.width - tip.offsetWidth) + 'px';
+  }
+  function chartLeave(e) {
+    const box = e.target.closest && e.target.closest('.chart');
+    if (!box) return;
+    box.querySelector('.tip').classList.add('hidden');
+    box.querySelector('.crosshair').classList.add('hidden');
   }
 
   /* ------------------------------------------------------------------ */
@@ -747,7 +1019,7 @@
     </div>`;
   }
 
-  const SCREENS = { initial: screenInitial, records: screenRecords, participant: screenParticipant, visit: screenVisit, visitview: screenVisitView, schedule: screenSchedule, messages: screenMessages, review: screenReview, protocol: screenProtocol };
+  const SCREENS = { initial: screenInitial, records: screenRecords, participant: screenParticipant, visit: screenVisit, visitview: screenVisitView, schedule: screenSchedule, messages: screenMessages, quality: screenQuality, analysis: screenAnalysis, protocol: screenProtocol };
 
   /* ------------------------------------------------------------------ */
   /* Modals                                                              */
@@ -766,15 +1038,16 @@
       const val = RS.validateVisit(P, vd, r, ctx);
       const safety = RS.safety(P, r.values, ctx);
       const label = (id) => (P.fields[id] || {}).label || id;
-      const ACTIONS = { urgent: ['Referred now (emergency or CHDr)', 'CHDr called and advised', 'Participant declined referral'], soon: ['Referral slip given', 'CHDr review booked', 'Participant declined referral'], report: ['Supervisor told'] };
-      const needAct = safety.filter((s) => ACTIONS[s.rule.level]);
+      const ACTIONS = actionsFor;
+      const needAct = safety.filter((s) => ACTIONS(s.rule).length);
       const ready = val.ok && needAct.every((s) => m.actions[s.rule.id]);
       html = `<div class="modal-card wide">${head(p.status === 'screening' ? 'Review and enrol' : 'Complete visit')}
         ${val.errors.length ? `<div class="alert urgent">${icon('alert')}<div><strong>${val.errors.length} thing${val.errors.length === 1 ? '' : 's'} to fix</strong>${val.errors.slice(0, 12).map((e) => `<div><button class="btn link" data-action="goto-field" data-field="${e.field}">${esc(label(e.field))}</button>: ${esc(e.text)}</div>`).join('')}${val.errors.length > 12 ? `<div>…and ${val.errors.length - 12} more</div>` : ''}</div></div>` : ''}
         ${val.disagreements.length ? `<div class="alert warn">${icon('ear')}<div><strong>Check what was heard</strong>${val.disagreements.map((d) => `<div>${esc(label(d.field))}: entered <b>${esc(fmtValue(P.fields[d.field], d.entered))}</b>, heard <b>${esc(fmtValue(P.fields[d.field], d.heard))}</b> <button class="btn sm" data-action="keep-entered" data-field="${d.field}">Keep</button> <button class="btn sm heard" data-action="use-heard" data-field="${d.field}">Use heard</button></div>`).join('')}</div></div>` : ''}
         ${val.softs.length ? `<div class="alert info">${icon('info')}<div><strong>Unusual values</strong>These become data queries for the supervisor: ${val.softs.map((s) => esc(label(s.field)) + ' ' + esc(fmtValue(P.fields[s.field], r.values[s.field]))).join(', ')}.</div></div>` : ''}
-        ${needAct.map((s) => `<div class="alert ${s.rule.level}">${icon('alert')}<div><strong>${esc(LEVEL[s.rule.level])}</strong>${esc(s.text)}<div class="chips" style="margin-top:6px">${ACTIONS[s.rule.level].map((a) => `<button class="chip ${m.actions[s.rule.id] === a ? 'on' : ''}" data-action="safety-act" data-rule="${s.rule.id}" data-v="${esc(a)}">${esc(a)}</button>`).join('')}</div></div></div>`).join('')}
+        ${needAct.map((s) => `<div class="alert ${s.rule.level}">${icon('alert')}<div><strong>${esc(LEVEL[s.rule.level])}</strong>${esc(s.text)}${s.rule.referTo ? `<div class="small">Refer to: <b>${esc(RS.referralSite(P, s.rule.referTo).name)}</b></div>` : ''}<div class="chips" style="margin-top:6px">${ACTIONS(s.rule).map((a) => `<button class="chip ${m.actions[s.rule.id] === a ? 'on' : ''}" data-action="safety-act" data-rule="${s.rule.id}" data-v="${esc(a)}">${esc(a)}</button>`).join('')}</div></div></div>`).join('')}
         ${val.ok && !needAct.length ? '<p>Everything required is recorded.</p>' : ''}
+        ${needAct.some((s) => s.rule.referTo && m.actions[s.rule.id] === REFERRED) ? `<p class="small">${icon('printer')} A referral handoff will be ready to print after you complete the visit.</p>` : ''}
         <p class="small muted">After this the visit is read-only.${p.status === 'screening' ? ' The participant is enrolled, given a study ID, and their visit schedule is created.' : ''}${listeningAllowed(p) ? ' The conversation text is discarded; only a note of re-checked answers is kept.' : ''}</p>
         <div class="btn-row end"><button class="btn" data-action="close-modal">Back to the form</button><button class="btn primary" data-action="confirm-complete" ${ready ? '' : 'disabled'}>${p.status === 'screening' ? 'Enrol' : 'Complete visit'}</button></div></div>`;
     } else if (m.type === 'late') {
@@ -819,6 +1092,29 @@
       html = `<div class="modal-card">${head('Assess safety event')}
         <label><span class="lbl">Assessment</span><textarea class="input" id="m-text" data-input="modal" data-k="text" placeholder="Serious? Related to study procedures? Reported to whom and when?">${esc(m.text || '')}</textarea></label>
         <div class="btn-row end"><button class="btn" data-action="close-modal">Cancel</button><button class="btn primary" data-action="confirm-assess" ${m.text && m.text.trim() ? '' : 'disabled'}>Save</button></div></div>`;
+    } else if (m.type === 'handoff') {
+      const ref = db.referrals.find((x) => x.id === m.refId);
+      const all = m.all || [m.refId];
+      html = `<div class="modal-card wide">${head(m.enrolled ? 'Enrolled · referral handoff' : 'Referral handoff')}
+        ${all.length > 1 ? `<div class="tabs">${all.map((id) => { const x = db.referrals.find((y) => y.id === id); return `<button class="${id === m.refId ? 'on' : ''}" data-action="handoff-tab" data-ref="${id}">${esc(RS.referralSite(P, x.to).name)}</button>`; }).join('')}</div>` : ''}
+        <p class="small muted">Print this and give it to the participant to take with them. The bottom part is for the clinician to fill in and return.</p>
+        <div class="handoff-preview">${handoffHtml(ref)}</div>
+        <div class="btn-row end"><button class="btn" data-action="close-modal">Close</button><button class="btn primary" data-action="print-handoff" data-ref="${ref.id}">${icon('printer')} Print</button></div></div>`;
+    } else if (m.type === 'outcome') {
+      const ref = db.referrals.find((x) => x.id === m.refId);
+      html = `<div class="modal-card">${head('Referral outcome')}<p>${esc(RS.referralSite(P, ref.to).name)} · referred ${esc(D.fmtLong(ref.createdAt.slice(0, 10)))}</p>
+        <div class="chips">${[['seen', 'Seen'], ['not_attended', 'Did not go']].map(([k, l]) => `<button class="chip ${m.status === k ? 'on' : ''}" data-action="modal-set" data-k="status" data-v="${k}">${l}</button>`).join('')}</div>
+        <label><span class="lbl">Date</span><input class="input" type="date" data-change="modal" data-k="date" value="${esc(m.date)}" max="${D.today()}"></label>
+        <label><span class="lbl">${m.status === 'not_attended' ? 'Why not (helps the team remove barriers)' : 'What was done (from the return slip)'}</span><textarea class="input" id="m-text" data-input="modal" data-k="text">${esc(m.text || '')}</textarea></label>
+        <div class="btn-row end"><button class="btn" data-action="close-modal">Cancel</button><button class="btn primary" data-action="confirm-outcome" ${m.status ? '' : 'disabled'}>Save</button></div></div>`;
+    } else if (m.type === 'household') {
+      const p = part(m.pid);
+      html = `<div class="modal-card">${head('Household')}<p>${esc(p.name)} is in household <b>${esc(p.household || 'none')}</b>${RS.householdMembers(db, p).length ? ` with ${RS.householdMembers(db, p).map((x) => esc(x.name)).join(', ')}` : ''}.</p>
+        <p class="small muted">People who live in the same home. Used for planning visits together and in the analysis (their results may be alike).</p>
+        <label><span class="lbl">Change to</span><select class="input" data-change="modal" data-k="with"><option value="">Choose…</option>
+          ${housemates(p.cluster, p.id).filter((x) => !x.household || x.household !== p.household).map((x) => `<option value="${x.id}" ${m.with === x.id ? 'selected' : ''}>Same household as ${esc(houseLabel(x))}</option>`).join('')}
+          <option value="new" ${m.with === 'new' ? 'selected' : ''}>A new household on their own</option></select></label>
+        <div class="btn-row end"><button class="btn" data-action="close-modal">Cancel</button><button class="btn primary" data-action="confirm-household" ${m.with ? '' : 'disabled'}>Save</button></div></div>`;
     } else if (m.type === 'enrolled') {
       const p = part(m.pid);
       html = `<div class="modal-card">${head('Enrolled')}<p><b>${esc(p.name)}</b> is now <b class="mono">${esc(p.studyId)}</b> (${esc(clusterOf(p).name)}, ${esc(clusterOf(p).arm)}).</p>
@@ -845,6 +1141,59 @@
     const nums = db.participants.map((p) => Number((p.studyId || '').split('-').pop())).filter((n) => !isNaN(n));
     return `${P.idPrefix}-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(4, '0')}`;
   }
+  /* ------------------------------------------------------------------ */
+  /* Referral handoff (printable)                                        */
+  /* ------------------------------------------------------------------ */
+  const REFERRED = 'Referred: handoff given';
+  /** What the collector can record for a safety rule. */
+  function actionsFor(rule) {
+    if (rule.referTo) return rule.level === 'urgent' ? [REFERRED, 'CHDr called and advised', 'Participant declined referral'] : [REFERRED, 'Participant declined referral'];
+    if (rule.level === 'urgent' || rule.level === 'soon') return ['Referred', 'CHDr called and advised', 'Participant declined referral'];
+    if (rule.level === 'report') return ['Supervisor told'];
+    return [];
+  }
+  /**
+   * The sheet the participant takes to the health centre: who they are, why they are referred, what
+   * was found today and before, their conditions and medicines, and a slip for the clinician to return.
+   * Mental health scores appear only on a mental health referral.
+   */
+  function handoffHtml(ref) {
+    const p = part(ref.participantId), r = rec(ref.visitRecId), site = RS.referralSite(P, ref.to), H = P.handoff;
+    const ctx = ctxOf(r);
+    const d = RS.derive(P, r.values, ctx);
+    const val = (id) => (P.derivedById[id] ? d[id] : r.values[id] != null && r.values[id] !== '' ? r.values[id] : ctx.base[id]);
+    const label = (id) => (P.fields[id] || P.derivedById[id] || {}).label || id;
+    const unit = (id) => (P.fields[id] || P.derivedById[id] || {}).unit;
+    const show = (id) => { const v = val(id); if (v == null || v === '') return ''; const f = P.fields[id]; return f ? fmtValue(f, v) : `${v}${unit(id) && typeof v === 'number' ? ' ' + unit(id) : ''}`; };
+    const rows = (ids) => ids.filter((id) => show(id)).map((id) => `<tr><td>${esc(label(id))}</td><td><b>${esc(show(id))}</b></td></tr>`).join('');
+    const prev = db.visits.filter((x) => x.participantId === p.id && x.status === 'complete' && x.id !== r.id && x.date <= r.date).sort((a, b) => b.date.localeCompare(a.date))[0];
+    const pd = prev ? RS.derive(P, prev.values, ctxOf(prev)) : {};
+    const prevVal = (id) => (prev ? (P.derivedById[id] ? pd[id] : prev.values[id]) : null);
+    const compare = (H.compare || []).filter((id) => val(id) != null && prevVal(id) != null);
+    const sensitive = (H.sensitive || {})[ref.to] || [];
+    const c = clusterOf(p);
+    return `<article class="handoff">
+      <header class="ho-head"><div><div class="ho-kicker">${esc(P.short)} · referral handoff</div><h1>${esc(site.name)}</h1>
+        <div class="ho-urg ${ref.urgency}">${ref.urgency === 'urgent' ? 'URGENT: please see today' : 'Please see within 1 week'}</div></div>
+        <div class="ho-id"><b>${esc(p.studyId || p.screeningNo)}</b><br>${esc(D.fmtLong(r.date))}</div></header>
+      <section><h2>Patient</h2><table><tbody>
+        <tr><td>Name</td><td><b>${esc(p.name)}</b></td></tr>
+        <tr><td>Age / sex</td><td>${esc(ageText(p))} · ${p.sex === 'F' ? 'Female' : 'Male'}</td></tr>
+        <tr><td>Community</td><td>${esc(c.name)}</td></tr>
+        <tr><td>Phone</td><td>${esc(p.phone || 'none')}</td></tr>
+        <tr><td>Language</td><td>${esc(p.language || '')}</td></tr></tbody></table></section>
+      <section><h2>Why they are referred</h2><ul>${ref.reasons.map((x) => `<li><b>${esc(LEVEL[x.level])}:</b> ${esc(x.text)}</li>`).join('')}</ul>${site.note ? `<p>${esc(site.note)}</p>` : ''}</section>
+      <section><h2>Findings at this visit (${esc(visitDef(r.visit).label)})</h2><table><tbody>${rows(H.findings)}${rows(sensitive)}${rows(H.symptoms.filter((id) => val(id) === 'yes' || (P.fields[id] && P.fields[id].type === 'text')))}</tbody></table>
+        ${compare.length ? `<p class="ho-note">Last study visit (${esc(D.fmtLong(prev.date))}): ${compare.map((id) => `${esc(label(id))} ${esc(prevVal(id))}${unit(id) ? ' ' + esc(unit(id)) : ''}`).join(' · ')}</p>` : ''}</section>
+      <section><h2>Known conditions and medicines</h2><table><tbody>${rows(H.history.concat(H.medicines))}</tbody></table></section>
+      <section class="ho-from"><p>Referred by <b>${esc(ref.by)}</b>, ${esc(P.short)} data collector (Community Health Officer). Study phone: <b>${esc(P.studyPhone)}</b>.</p>
+        <p class="ho-note">These are research measurements taken in the community under the ${esc(P.title.split(':')[0])} protocol (${esc(P.version)}). The study team does not diagnose or prescribe; please assess and treat as usual.</p></section>
+      <section class="ho-return"><h2>Return slip: please complete and give back to the patient</h2>
+        <table><tbody><tr><td>Seen by</td><td class="line"></td></tr><tr><td>Date</td><td class="line"></td></tr><tr><td>Assessment</td><td class="line"></td></tr><tr><td>Treatment / medicines changed</td><td class="line"></td></tr><tr><td>Follow-up</td><td class="line"></td></tr></tbody></table>
+        <p class="ho-note">Study ID ${esc(p.studyId || p.screeningNo)} · referral ${esc(ref.id.slice(-6).toUpperCase())}</p></section>
+    </article>`;
+  }
+
   function completeVisit(m) {
     const r = rec(m.recId), p = part(r.participantId), vd = visitDef(r.visit), ctx = ctxOf(r);
     const val = RS.validateVisit(P, vd, r, ctx);
@@ -863,6 +1212,11 @@
     Object.keys(r.values).forEach((k) => { if (!shown.has(k)) delete r.values[k]; });
     val.softs.forEach((s) => RS.raiseQuery(db, { participantId: p.id, visitRecId: r.id, field: s.field, text: s.text, by: 'Automatic check', auto: true }));
     safety.filter((s) => s.rule.level === 'report' || s.rule.level === 'urgent').forEach((s) => db.events.push({ id: RS.uid('ev'), kind: s.rule.level === 'report' ? 'Possible SAE' : 'Urgent referral', participantId: p.id, visitRecId: r.id, reportedAt: now, text: s.text + (r.values.admit_reason && s.rule.id === 'sae' ? ` (${r.values.admit_reason})` : ''), status: 'new' }));
+    // One referral (and one handoff sheet) per destination, for the rules the collector marked as referred.
+    RS.referralsFor(P, safety.filter((s) => m.actions[s.rule.id] === REFERRED)).forEach((g) => db.referrals.push({
+      id: RS.uid('ref'), participantId: p.id, visitRecId: r.id, to: g.to, urgency: g.urgency,
+      reasons: g.rules.map((s) => ({ id: s.rule.id, level: s.rule.level, text: s.text })), createdAt: now, by: me().name, status: 'open', outcome: null,
+    }));
     if (S.listen.recId === r.id) { stopMic(); S.listen = { recId: null, text: '', recording: false, interim: '', mode: S.listen.mode }; }
     if (p.status === 'screening') {
       p.status = 'enrolled';
@@ -878,9 +1232,9 @@
 
   const handlers = {
     go: (el) => { if (el.dataset.screen === 'initial') { S.pid = null; S.idDraft = null; } go(el.dataset.screen); },
-    'set-role': (el) => { S.role = el.dataset.role; saveUi(); go(S.role === 'SUPERVISOR' ? 'review' : 'schedule'); },
+    'set-role': (el) => { S.role = el.dataset.role; saveUi(); S.idDraft = null; S.compose = null; S.msgTab = isSup() ? 'pending' : 'suggested'; go(homeScreen()); },
     'toggle-test': () => { S.test = !S.test; saveUi(); render(); },
-    'reset-demo': () => { if (!confirm('Reset all demo data on this device?')) return; stopMic(); db = RS.seed(); save(); S.listen = { recId: null, text: '', recording: false, interim: '', mode: 'check' }; go(S.role === 'SUPERVISOR' ? 'review' : 'schedule'); toast('Demo data reset'); },
+    'reset-demo': () => { if (!confirm('Reset all demo data on this device?')) return; stopMic(); db = RS.seed(); save(); S.listen = { recId: null, text: '', recording: false, interim: '', mode: 'check' }; go(homeScreen()); toast('Demo data reset'); },
     'close-modal': () => closeModal(),
     goto: (el) => { const n = $(el.dataset.target); if (n) n.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
     'goto-field': (el) => { closeModal(); S.tried = true; render(); const n = $('fld-' + el.dataset.field); if (n) n.scrollIntoView({ behavior: 'smooth', block: 'center' }); },
@@ -895,6 +1249,9 @@
         dob: d.dobMode === 'dob' ? d.dob : D.dobFromAge(age), dobEstimated: d.dobMode !== 'dob', cluster: d.cluster, phone: d.phone.trim(), language: d.language,
         status: 'screening', wiz: 'eligibility', screenedAt: D.today(), screening: { answers: {}, by: me().name },
       };
+      const mate = d.houseWith && part(d.houseWith);
+      if (mate) { if (!mate.household) mate.household = RS.newHouseholdId(db); p.household = mate.household; }
+      else p.household = RS.newHouseholdId(db);
       db.participants.push(p);
       save();
       S.idDraft = null;
@@ -965,11 +1322,42 @@
     'safety-act': (el) => { S.modal.actions[el.dataset.rule] = el.dataset.v; renderModal(); },
     'confirm-complete': () => {
       const wasScreening = part(rec(S.modal.recId).participantId).status === 'screening';
+      const r = rec(S.modal.recId);
       const p = completeVisit(S.modal);
       S.modal = null;
+      const refs = db.referrals.filter((x) => x.visitRecId === r.id);
       go('participant', { pid: p.id });
-      if (wasScreening) openModal({ type: 'enrolled', pid: p.id });
+      if (refs.length) openModal({ type: 'handoff', refId: refs[0].id, all: refs.map((x) => x.id), enrolled: wasScreening });
+      else if (wasScreening) openModal({ type: 'enrolled', pid: p.id });
       else toast('Visit completed');
+    },
+    // referrals
+    'handoff-tab': (el) => { S.modal.refId = el.dataset.ref; renderModal(); },
+    'view-handoff': (el) => openModal({ type: 'handoff', refId: el.dataset.ref, all: [el.dataset.ref] }),
+    'print-handoff': (el) => {
+      const ref = db.referrals.find((x) => x.id === el.dataset.ref);
+      $('print').innerHTML = handoffHtml(ref);
+      ref.printedAt = ref.printedAt || new Date().toISOString();
+      save();
+      window.print();
+    },
+    'referral-outcome': (el) => openModal({ type: 'outcome', refId: el.dataset.ref, status: '', date: D.today(), text: '' }),
+    'confirm-outcome': () => {
+      const m = S.modal, ref = db.referrals.find((x) => x.id === m.refId);
+      ref.status = m.status;
+      ref.outcome = { date: m.date, text: (m.text || '').trim(), by: me().name };
+      RS.audit(db, { by: me().name, participantId: ref.participantId, what: `Referral to ${RS.referralSite(P, ref.to).name}: ${m.status === 'seen' ? 'seen' : 'did not attend'}`, reason: ref.outcome.text });
+      save(); closeModal(); render();
+    },
+    // households
+    household: (el) => openModal({ type: 'household', pid: el.dataset.pid, with: '' }),
+    'confirm-household': () => {
+      const m = S.modal, p = part(m.pid);
+      const before = p.household;
+      if (m.with === 'new') p.household = RS.newHouseholdId(db);
+      else { const mate = part(m.with); if (!mate.household) mate.household = RS.newHouseholdId(db); p.household = mate.household; }
+      RS.audit(db, { by: me().name, participantId: p.id, what: `Household ${before || 'none'} → ${p.household}` });
+      save(); closeModal(); render();
     },
 
     // records and participant
@@ -1023,6 +1411,7 @@
     'assess-event': (el) => openModal({ type: 'assess', ev: el.dataset.ev, text: '' }),
     'confirm-assess': () => { const e = db.events.find((x) => x.id === S.modal.ev); e.status = 'assessed'; e.assessment = S.modal.text.trim(); e.by = me().name; save(); closeModal(); render(); },
     'review-tab': (el) => { S.reviewTab = el.dataset.v; render(); },
+    'an-measure': (el) => { S.an.measure = el.dataset.v; render(); },
     export: (el) => {
       const k = el.dataset.k, day = D.today();
       if (k === 'visits') download(`icehall-visits-${day}.csv`, RS.exportVisits(db, P));
@@ -1044,7 +1433,7 @@
     'compose-send': () => {
       const c = S.compose, aud = audienceOf(c.audience);
       const recipients = aud.ok.map((p) => ({ participantId: p.id, phone: p.phone, text: RS.fillMessage(c.text, RS.messageVars(P, p, null, me().name)) }));
-      const status = aud.group && !isSup() ? 'pending' : 'sent';
+      const status = aud.group ? 'pending' : 'sent';
       sendMessage(c.kind || (aud.group ? 'group' : 'custom'), c.key, aud.label, recipients, status);
       S.compose = null;
       toast(status === 'pending' ? 'Sent to the supervisor for approval' : `Sent to ${recipients.length} ${recipients.length === 1 ? 'person' : 'people'}`);
@@ -1054,7 +1443,8 @@
     'sug-send': (el) => { const s = suggestions()[Number(el.dataset.i)]; sendMessage(s.kind, s.key, pLabel(s.participant), [{ participantId: s.participant.id, phone: s.participant.phone, text: s.text }], 'sent'); toast('Sent to ' + s.participant.name); render(); },
     'sug-edit': (el) => { const s = suggestions()[Number(el.dataset.i)]; S.compose = { audience: 'person:' + s.participant.id, template: s.kind === 'encouragement' ? 'general' : s.kind, text: s.text, kind: s.kind, key: s.key }; S.msgTab = 'compose'; render(); },
     'sug-dismiss': (el) => { const s = suggestions()[Number(el.dataset.i)]; db.dismissed[dismissKey(s)] = D.today(); save(); render(); },
-    'msg-approve': (el) => { const m = db.messages.find((x) => x.id === el.dataset.m); m.status = 'sent'; m.sentAt = new Date().toISOString(); m.sentBy = me().name; m.approvedBy = me().name; save(); render(); toast('Approved and sent'); },
+    // Approving releases the collector's message; it goes out from the collector's tablet (or the gateway).
+    'msg-approve': (el) => { const m = db.messages.find((x) => x.id === el.dataset.m); m.status = 'sent'; m.sentAt = new Date().toISOString(); m.sentBy = m.createdBy; m.approvedBy = me().name; save(); render(); toast('Approved: released to send'); },
     'msg-reject': (el) => { const m = db.messages.find((x) => x.id === el.dataset.m); m.status = 'returned'; save(); render(); toast('Sent back to ' + m.createdBy); },
   };
 
@@ -1067,8 +1457,13 @@
     const h = handlers[el.dataset.action];
     if (!h) return;
     if (el.tagName !== 'INPUT') e.preventDefault();
+    const a = el.dataset.action;
+    if (isSup() ? COLLECTOR_ONLY.has(a) : SUPERVISOR_ONLY.has(a)) { toast(isSup() ? 'The supervisor view is for review: data collectors run visits and message participants.' : 'Only the supervisor can do this.'); return; }
     h(el, e);
   });
+  // Belt and braces: the buttons are hidden in the other view too.
+  const COLLECTOR_ONLY = new Set(['start-screening', 'start-visit', 'confirm-late', 'complete-visit', 'confirm-complete', 'withdraw', 'confirm-withdraw', 'consent-change', 'confirm-consent-change', 'remind', 'compose-to', 'compose-send', 'sug-send', 'sug-edit', 'answer-query', 'referral-outcome', 'confirm-outcome', 'household', 'confirm-household', 'resume-screening']);
+  const SUPERVISOR_ONLY = new Set(['raise-query', 'confirm-query', 'close-query', 'reopen-query', 'correct', 'confirm-correct', 'mark-reviewed', 'assess-event', 'confirm-assess', 'msg-approve', 'msg-reject', 'export']);
   document.addEventListener('input', (e) => {
     const el = e.target;
     const k = el.dataset.input;
@@ -1091,8 +1486,12 @@
     const el = e.target;
     const k = el.dataset.change;
     if (!k) return;
-    if (k === 'id') { S.idDraft[el.dataset.k] = el.value; render(); }
+    if (k === 'id') { S.idDraft[el.dataset.k] = el.value; if (el.dataset.k === 'cluster') S.idDraft.houseWith = ''; render(); }
     else if (k === 'modal') { S.modal[el.dataset.k] = el.value; renderModal(); }
+    else if (k === 'collector') { S.collectorId = el.value; S.role = 'COLLECTOR'; saveUi(); S.idDraft = null; S.compose = null; go(['participant', 'visitview', 'records', 'messages', 'protocol'].includes(S.screen) ? S.screen : 'schedule'); }
+    else if (k === 'filter') { S.f[el.dataset.k] = el.value; render(); }
+    else if (k === 'an') { S.an[el.dataset.k] = el.value; render(); }
+    else if (k === 'rec-cluster') { S.recCluster = el.value; render(); }
     else if (k === 'compose') {
       S.compose[el.dataset.k] = el.value;
       if (el.dataset.k === 'template') S.compose.text = P.messages.templates[el.value].text;
@@ -1105,6 +1504,8 @@
     }
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.modal) closeModal(); });
+  document.addEventListener('pointermove', (e) => { if (e.target.closest && e.target.closest('.chart .hit')) chartHover(e); });
+  document.addEventListener('pointerout', (e) => { if (e.target.classList && e.target.classList.contains('hit')) chartLeave(e); });
 
   render();
 })();

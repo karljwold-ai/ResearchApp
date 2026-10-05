@@ -19,6 +19,7 @@
         <div class="seg" role="group" aria-label="Prototype view (test only)">
           <span class="seg-label">View</span>
           <button data-action="set-role" data-role="COLLECTOR">Data collector</button>
+          <select id="collectorSel" class="seg-select" data-change="collector" aria-label="Which data collector"></select>
           <button data-action="set-role" data-role="SUPERVISOR">Supervisor</button>
         </div>
       </div>
@@ -29,6 +30,8 @@
 <div class="scrim hidden" id="scrim" data-action="close-modal"></div>
 <div class="modal hidden" id="modal" role="dialog" aria-modal="true"></div>
 <div class="toast hidden" id="toast" role="status"></div>
+<!-- Filled just before printing (referral handoff) -->
+<div id="print" aria-hidden="true"></div>
 
 <!-- Core, then the shared rule and listening engine, then protocols (add new protocol files here), then the app -->
 <script src="js/core.js"></script>

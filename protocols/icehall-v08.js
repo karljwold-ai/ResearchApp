@@ -313,20 +313,57 @@
 
     /* ---------------- Safety and escalation (Table 15.1, 8.3a, 8.4) ---------------- */
     // urgent: act now · soon: refer or CHDr review · report: tell the supervisor (reportable event) · note: for information
+    // Where a referral goes (Table 15.1). ASSUMPTION: the country referral map is NEED INFO; these are generic.
+    referralSites: [
+      { id: 'emergency', name: 'Hospital emergency department', note: 'Emergency pathway. Arrange transport if needed.' },
+      { id: 'chdr', name: 'Area health centre: Community Health Doctor (CHDr)' },
+      { id: 'mental_health', name: 'Mental health service (bench-grandma or mental health professional)' },
+      { id: 'antenatal', name: 'Antenatal clinic' },
+    ],
+    // What a referral handoff shows (besides the reasons and the participant's details).
+    handoff: {
+      findings: ['bp_1', 'bp_2', 'bp_3', 'sys_mean', 'dia_mean', 'pulse', 'weight', 'bmi', 'waist', 'hba1c', 'rbg', 'egfr'],
+      symptoms: ['chest_pain', 'dm_red_flags', 'severe_hypo', 'admitted', 'admit_reason', 'pregnant', 'pregnant_now'],
+      history: ['cohort_dm', 'cohort_htn', 'cvd_hx', 'ckd_hx', 'smoking'],
+      medicines: ['on_htn_meds', 'on_dm_meds', 'on_insulin', 'on_statin', 'med_list', 'side_effects'],
+      sensitive: { mental_health: ['phq9_total', 'phq_9', 'gad7_total'] }, // only on a mental health referral
+      compare: ['sys_mean', 'dia_mean', 'hba1c'], // shown against the last visit
+    },
     safety: [
-      { id: 'self_harm', level: 'urgent', when: 'phq_9 >= 1', source: 'Table 8.4', text: 'PHQ-9 item 9 positive (thoughts of death or self-harm): immediate mental health escalation and safety plan per country SOP, whatever the total score. Do not leave the person alone if at immediate risk.' },
-      { id: 'emergency', level: 'urgent', when: 'chest_pain = yes', source: 'Table 15.1', text: 'Chest pain, stroke symptoms or severe breathlessness: emergency pathway now.' },
-      { id: 'bp_very_high', level: 'urgent', when: 'sys_mean >= 180 OR dia_mean >= 110', source: 'Table 15.1 (threshold: ASSUMPTION pending country CMA)', text: 'BP {sys_mean}/{dia_mean}: very high. Repeat per SOP; if still this high, urgent CHDr or emergency referral.' },
-      { id: 'dm_red_flags', level: 'urgent', when: 'dm_red_flags = yes OR rbg >= 400', source: 'Table 8.3a, Table 15.1 (glucose threshold: ASSUMPTION)', text: 'Diabetes red flag (possible DKA/HHS, foot ulcer, vision change, or very high glucose): notify the CHDr now; emergency transport if needed.' },
-      { id: 'severe_hypo', level: 'urgent', when: 'severe_hypo = yes', source: 'Table 15.1', text: 'Severe low sugar since the last visit: urgent referral and CHDr notification.' },
-      { id: 'mh_referral', level: 'soon', when: 'phq9_total >= 10 OR gad7_total >= 10', source: 'Table 8.4', text: 'PHQ-9 {phq9_total}, GAD-7 {gad7_total}: structured referral (bench-grandma or equivalent, or a mental health professional).' },
-      { id: 'screen_positive', level: 'soon', when: 'visit = baseline AND dm_known != yes AND (screen_hba1c >= 6.5 OR screen_rbg >= 200)', source: 'Table 8.3a', text: 'New screen-positive for diabetes: refer for a confirmatory fasting glucose or repeat HbA1c at the health centre; CHDr confirms the diagnosis.' },
-      { id: 'hba1c_high_twice', level: 'soon', when: 'hba1c >= 8 AND prev_hba1c >= 8', source: 'Table 8.3a (default target < 7.0%)', text: 'HbA1c {hba1c}% and {prev_hba1c}% last time: 1% or more above target at two visits. CHDr review for medicine change or referral.' },
-      { id: 'pregnancy', level: 'soon', when: 'pregnant = yes OR pregnant_now = yes', source: 'Table 8.3a, Table 7.1', text: 'Pregnant: refer to antenatal care. CHDr reviews medicines (stop those not safe in pregnancy) and coordinates with the obstetric team.' },
-      { id: 'kidney', level: 'soon', when: 'egfr < 30', source: 'Table 15.1 (concerning lab; threshold ASSUMPTION)', text: 'eGFR {egfr}: concerning result. CHDr review and referral per CMA.' },
+      { id: 'self_harm', level: 'urgent', referTo: 'mental_health', when: 'phq_9 >= 1', source: 'Table 8.4', text: 'PHQ-9 item 9 positive (thoughts of death or self-harm): immediate mental health escalation and safety plan per country SOP, whatever the total score. Do not leave the person alone if at immediate risk.' },
+      { id: 'emergency', level: 'urgent', referTo: 'emergency', when: 'chest_pain = yes', source: 'Table 15.1', text: 'Chest pain, stroke symptoms or severe breathlessness: emergency pathway now.' },
+      { id: 'bp_very_high', level: 'urgent', referTo: 'chdr', when: 'sys_mean >= 180 OR dia_mean >= 110', source: 'Table 15.1 (threshold: ASSUMPTION pending country CMA)', text: 'BP {sys_mean}/{dia_mean}: very high. Repeat per SOP; if still this high, urgent CHDr or emergency referral.' },
+      { id: 'dm_red_flags', level: 'urgent', referTo: 'chdr', when: 'dm_red_flags = yes OR rbg >= 400', source: 'Table 8.3a, Table 15.1 (glucose threshold: ASSUMPTION)', text: 'Diabetes red flag (possible DKA/HHS, foot ulcer, vision change, or very high glucose): notify the CHDr now; emergency transport if needed.' },
+      { id: 'severe_hypo', level: 'urgent', referTo: 'chdr', when: 'severe_hypo = yes', source: 'Table 15.1', text: 'Severe low sugar since the last visit: urgent referral and CHDr notification.' },
+      { id: 'mh_referral', level: 'soon', referTo: 'mental_health', when: 'phq9_total >= 10 OR gad7_total >= 10', source: 'Table 8.4', text: 'PHQ-9 {phq9_total}, GAD-7 {gad7_total}: structured referral (bench-grandma or equivalent, or a mental health professional).' },
+      { id: 'screen_positive', level: 'soon', referTo: 'chdr', when: 'visit = baseline AND dm_known != yes AND (screen_hba1c >= 6.5 OR screen_rbg >= 200)', source: 'Table 8.3a', text: 'New screen-positive for diabetes: refer for a confirmatory fasting glucose or repeat HbA1c at the health centre; CHDr confirms the diagnosis.' },
+      { id: 'hba1c_high_twice', level: 'soon', referTo: 'chdr', when: 'hba1c >= 8 AND prev_hba1c >= 8', source: 'Table 8.3a (default target < 7.0%)', text: 'HbA1c {hba1c}% and {prev_hba1c}% last time: 1% or more above target at two visits. CHDr review for medicine change or referral.' },
+      { id: 'pregnancy', level: 'soon', referTo: 'antenatal', when: 'pregnant = yes OR pregnant_now = yes', source: 'Table 8.3a, Table 7.1', text: 'Pregnant: refer to antenatal care. CHDr reviews medicines (stop those not safe in pregnancy) and coordinates with the obstetric team.' },
+      { id: 'kidney', level: 'soon', referTo: 'chdr', when: 'egfr < 30', source: 'Table 15.1 (concerning lab; threshold ASSUMPTION)', text: 'eGFR {egfr}: concerning result. CHDr review and referral per CMA.' },
       { id: 'sae', level: 'report', when: 'admitted = yes', source: '§15 Adverse event definitions', text: 'Hospital admission: possible serious adverse event. Tell the supervisor within 24 hours.' },
       { id: 'catastrophic', level: 'note', when: 'catastrophic = yes', source: 'Table 10.2 (catastrophic spending)', text: 'Borrowed or sold something to pay for care: record for the economic analysis; mention support options if the site has them.' },
     ],
+
+    /* ---------------- Analysis (descriptive, for study management) ---------------- */
+    // Measures offered on the Analysis screen. kind 'percent': share of people with the value `yes`.
+    // cohort limits the people counted (derived yes/no value).
+    analysis: {
+      note: 'Descriptive, unadjusted summaries for running the study. Not the SAP analysis (§12: mixed models with cluster effects, prespecified covariates, analysts blinded where feasible). v08 interim analyses cover safety, data quality, recruitment, retention and implementation; check the DSMB charter before sharing outcome comparisons between arms.',
+      measures: [
+        { id: 'sys_mean', label: 'Systolic BP', unit: 'mmHg', cohort: 'cohort_htn', better: 'lower' },
+        { id: 'dia_mean', label: 'Diastolic BP', unit: 'mmHg', cohort: 'cohort_htn', better: 'lower' },
+        { id: 'bp_controlled', label: 'BP below 140/90', kind: 'percent', yes: 'yes', cohort: 'cohort_htn', better: 'higher' },
+        { id: 'hba1c', label: 'HbA1c', unit: '%', cohort: 'cohort_dm', better: 'lower', decimals: 1 },
+        { id: 'hba1c_at_target', label: 'HbA1c below 7%', kind: 'percent', yes: 'yes', cohort: 'cohort_dm', better: 'higher' },
+        { id: 'phq9_total', label: 'PHQ-9 (depression)', unit: 'points', better: 'lower', decimals: 1 },
+        { id: 'gad7_total', label: 'GAD-7 (anxiety)', unit: 'points', better: 'lower', decimals: 1 },
+        { id: 'mars5_total', label: 'MARS-5 (adherence)', unit: 'points', better: 'higher', decimals: 1 },
+        { id: 'med_access', label: "Couldn't get a medicine", kind: 'percent', yes: 'yes', better: 'lower' },
+        { id: 'bmi', label: 'BMI', unit: 'kg/m²', better: 'lower', decimals: 1 },
+        { id: 'waist', label: 'Waist', unit: 'cm', better: 'lower' },
+        { id: 'ipaq_met', label: 'Physical activity', unit: 'MET-min/week', better: 'higher' },
+      ],
+    },
 
     /* ---------------- Messages ---------------- */
     messages: {

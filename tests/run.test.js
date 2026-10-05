@@ -192,5 +192,70 @@ test('export: no names or phone numbers', () => {
   assert.strictEqual(RS.exportVisits(db, P).split('\n').length, 1 + db.visits.filter((r) => r.status === 'complete').length);
 });
 
+test('referrals: one per destination, most urgent rule sets the urgency', () => {
+  const p = person({ screening: { answers: { dm_known: 'yes' } } });
+  const fired = RS.safety(P, { bp_2: '186/114', bp_3: '184/112', hba1c: 8.2, admitted: 'yes', phq_1: '3', phq_2: '3', phq_3: '3', phq_4: '1', phq_5: '0', phq_6: '0', phq_7: '0', phq_8: '0', phq_9: '0' }, RS.ctxFor(p, null, 'm6', { hba1c: 8.5 }));
+  const refs = RS.referralsFor(P, fired);
+  const by = Object.fromEntries(refs.map((r) => [r.to, r]));
+  assert.deepStrictEqual(Object.keys(by).sort(), ['chdr', 'mental_health']);
+  assert.strictEqual(by.chdr.urgency, 'urgent', 'very high BP makes the CHDr referral urgent');
+  assert.deepStrictEqual(by.chdr.rules.map((s) => s.rule.id).sort(), ['bp_very_high', 'hba1c_high_twice']);
+  assert.strictEqual(by.mental_health.urgency, 'soon');
+  assert.ok(!refs.some((r) => r.rules.some((s) => s.rule.id === 'sae')), 'a reportable event is not a referral');
+});
+
+test('performance by collector: follow-up, in window, missed, referrals', () => {
+  const db = RS.seed();
+  const of = (id) => db.participants.filter((p) => RS.STAFF.collectors.find((c) => c.id === id).clusters.includes(p.cluster));
+  const ravi = RS.performance(db, P, of('c1')), anisha = RS.performance(db, P, of('c2'));
+  [ravi, anisha].forEach((m) => {
+    assert.strictEqual(m.visitsDue, m.visitsDone + m.visitsMissed);
+    assert.ok(m.visitsInWindow <= m.visitsDone);
+    assert.ok(m.completeness > 0.9 && m.completeness <= 1);
+  });
+  assert.ok(ravi.followUpRate < anisha.followUpRate, 'the demo builds in a follow-up gap between collectors');
+  // A tiny hand-made case: one enrolled 120 days ago, month 3 done late, nothing else.
+  const db2 = RS.emptyDb();
+  const p = { id: 'x', status: 'enrolled', enrolledAt: D.addDays(D.today(), -120) };
+  db2.participants.push(p);
+  db2.visits.push({ id: 'r', participantId: 'x', visit: 'm3', status: 'complete', date: D.addDays(D.today(), -10), values: {}, safety: [] });
+  const m = RS.performance(db2, P, [p]);
+  assert.deepStrictEqual([m.visitsDue, m.visitsDone, m.visitsInWindow, m.visitsMissed], [1, 1, 0, 0]);
+});
+
+test('analysis: means by visit and within-person change', () => {
+  const db = RS.emptyDb();
+  const mk = (id, base, m6) => {
+    const p = { id, status: 'enrolled', enrolledAt: '2025-01-01', cluster: 'esperance', dob: '1970-01-01', sex: 'F', screening: { answers: { htn_known: 'yes' } } };
+    db.participants.push(p);
+    db.visits.push({ id: id + 'b', participantId: id, visit: 'baseline', status: 'complete', date: '2025-01-01', values: { bp_2: `${base}/90`, bp_3: `${base}/90` } });
+    if (m6) db.visits.push({ id: id + '6', participantId: id, visit: 'm6', status: 'complete', date: '2025-07-01', values: { bp_2: `${m6}/85`, bp_3: `${m6}/85` } });
+    return p;
+  };
+  const a = mk('a', 160, 150), b = mk('b', 140, null);
+  const sys = P.analysis.measures.find((x) => x.id === 'sys_mean');
+  const out = RS.outcomeSeries(db, P, sys, [{ key: 'g', label: 'G', parts: [a, b] }]);
+  assert.deepStrictEqual(out.visits, ['baseline', 'm6']);
+  assert.strictEqual(out.series[0].points.baseline.mean, 150);
+  assert.strictEqual(out.series[0].points.m6.n, 1);
+  assert.deepStrictEqual(out.series[0].change, { mean: -10, n: 1 }, 'only people with both visits count towards change');
+  const ctl = P.analysis.measures.find((x) => x.id === 'bp_controlled');
+  assert.strictEqual(RS.outcomeSeries(db, P, ctl, [{ key: 'g', label: 'G', parts: [a, b] }]).series[0].points.baseline.mean, 0);
+  const en = RS.enrolmentSeries([{ key: 'g', label: 'G', parts: [a, b] }], '2025-03-15');
+  assert.deepStrictEqual(en.months, ['2025-01', '2025-02', '2025-03']);
+  assert.deepStrictEqual(en.series[0].counts, [2, 2, 2]);
+});
+
+test('households link people; protocol checks referral sites and analysis measures', () => {
+  const db = RS.seed();
+  const anjali = db.participants.find((p) => p.name === 'Anjali Doorgakant');
+  assert.deepStrictEqual(RS.householdMembers(db, anjali).map((p) => p.name), ['Dev Doorgakant']);
+  assert.ok(/^H-\d{4}$/.test(RS.newHouseholdId(db)));
+  assert.ok(!db.participants.some((p) => p.household === RS.newHouseholdId(db)));
+  assert.ok(RS.exportParticipants(db).split('\n')[0].includes('household_id'));
+  P.safety.filter((r) => r.referTo).forEach((r) => assert.ok(P.referralSites.some((s) => s.id === r.referTo), r.id));
+  P.analysis.measures.forEach((m) => assert.ok(P.isField(m.id), m.id));
+});
+
 console.log(`\n${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);
