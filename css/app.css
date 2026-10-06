@@ -432,3 +432,40 @@ body[data-role="COLLECTOR"] .seg-select { color: var(--level); }
 .dz-when .lbl { margin-bottom: 2px; }
 .some-mark { display: block; font-size: 10px; color: var(--amber); font-weight: 700; }
 .nowrap { white-space: nowrap; }
+
+/* ---------- Data collector: the same pieces as the Jamii clinical app ---------- */
+.home-hero { display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px; margin-bottom: 16px; box-shadow: var(--shadow); }
+.home-hero h1 { font-size: 26px; margin: 0 0 4px; }
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.btn.xl { min-height: 56px; padding: 0 26px; font-size: 17px; border-radius: 14px; }
+.mini-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 8px; border: 0; border-bottom: 1px solid var(--line-2); background: transparent; text-align: left; min-height: 56px; color: inherit; }
+.mini-row:last-child { border-bottom: 0; }
+.mini-row:hover { background: var(--surface-2); }
+.mini-main { flex: 1; min-width: 0; display: grid; }
+.mini-main span { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-icon { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); flex: none; }
+.avatar.sm { width: 32px; height: 32px; font-size: 12px; background: var(--brand-soft); color: var(--brand); }
+.due { font-size: 12px; font-weight: 800; white-space: nowrap; color: var(--muted); }
+.due.today { color: var(--brand); }
+.due.overdue { color: var(--red); }
+.next-block { background: var(--brand-soft); border: 1px solid #c7d8ee; border-radius: 14px; padding: 10px; margin-bottom: 16px; }
+.next-label { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--brand); margin: 2px 4px 8px; }
+.next-block .fld { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; }
+.next-block .fld:last-child { margin-bottom: 0; }
+.skip-q { display: block; margin: 6px 0 0 auto; color: var(--muted); font-size: 13px; }
+.q-progress { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+@media (max-width: 760px) { .home-hero { flex-direction: column; align-items: stretch; } }
+.split-label { display: flex; align-items: center; gap: 10px; margin: 20px 0 10px; font-size: 13px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.split-label::before, .split-label::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.next-from { margin: 6px 4px 3px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
+.next-from:first-of-type { margin-top: 0; }
+/* Question rows, as in Jamii: the question on the left, the answer on the right (wide screens) */
+@media (min-width: 900px) {
+  .next-block .fld, .fsec .fld { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 18px; align-items: center; }
+  .next-block .fld > *, .fsec .fld > * { grid-column: 1 / -1; }
+  .next-block .fld > .fld-label, .fsec .fld > .fld-label, .next-block .fld > .fld-help, .fsec .fld > .fld-help { grid-column: 1; }
+  .next-block .fld > .fld-input, .fsec .fld > .fld-input { grid-column: 2; grid-row: 1 / span 2; justify-self: end; margin: 0; }
+  .next-block .fld > .fld-input .input.wide, .fsec .fld > .fld-input .input.wide { min-width: 280px; }
+  .next-block .fld > .missing-row, .fsec .fld > .missing-row { grid-column: 1; }
+  .next-block .fld > .skip-q, .fsec .fld > .skip-q { grid-column: 2; grid-row: 3; margin: 0; justify-self: end; }
+}

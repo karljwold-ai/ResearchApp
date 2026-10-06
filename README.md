@@ -30,13 +30,20 @@ Use the **View** switch at the top to change between them. In a real deployment,
 the view. The demo has two data collectors, each covering two clusters (one intervention, one
 standard care); pick which one with the menu next to **Data collector**.
 
+The data collector's screens look and work like the **Jamii** clinical app, so a CHW already using
+Jamii doesn't learn a new system: the same menu, Home, Start visit, Open visits, Follow-ups, and
+question rows with **Ask next** and **Skip for now**.
+
 | Data collector (CHO) | Supervisor (review only) |
 |---|---|
-| **Initial visit**: identify (including household) → eligibility → consent → baseline data → enrol | **Data quality**: follow-up, missed visits, data completeness, queries, safety events and referrals, filterable by cluster and data collector, plus CSV export and the audit trail |
-| **Participant records**: visits and windows, BP trend, referrals, queries, household, messages | **Analysis**: enrolment over time, and outcomes by visit (BP, HbA1c, PHQ-9, GAD-7, adherence and more), split by cluster or by arm |
-| **Schedule**: their own clusters, by status or by cluster, with household members due together | **Participant records** and **Schedule**: read only |
-| **Messaging**: suggested reminders and encouragement, writing a message, sent log | **Messaging**: approves or sends back group messages; never writes to participants |
-| **Protocol**: the schedule of activities, rules and open items | **Protocol** |
+| **Home**: greeting and Start visit; Follow-ups (overdue, due now), Open visits, Study guide | **Data quality**: follow-up, missed visits, data completeness, queries, safety events and referrals, filterable by cluster and data collector, plus CSV export and the audit trail |
+| **Start visit**: a returning participant first (search; due visits on top, one tap to start), or a new participant: identify (including household) → eligibility → consent → baseline data → enrol | **Analysis**: enrolment over time, and outcomes by visit (BP, HbA1c, PHQ-9, GAD-7, adherence and more), split by cluster or by arm |
+| **Visit**: *Ask next* shows the next three unanswered questions; *Skip for now* moves one to the end (it still needs an answer or a reason; questions used by a safety rule can't be skipped); question on the left, answer on the right; the full sections below | **Participant records** and **Schedule**: read only |
+| **Participant records**: visits and windows, BP trend, referrals, queries, household, messages | **Messaging**: approves or sends back group messages; never writes to participants |
+| **Open visits**: visits started and not finished, and screenings in progress | **Protocol** |
+| **Follow-ups**: overdue, due now, coming up in the next 2 weeks; by date or by cluster, with household members due together | **Study design** and **Export data** (see below) |
+| **Messages**: suggested reminders and encouragement, writing a message, sent log | |
+| **Study guide**: the schedule of activities, rules and open items | |
 
 The supervisor doesn't run visits or message participants. On completed visits they can **Query**,
 **Correct** (with a reason, kept in the audit trail) and **Mark reviewed**.

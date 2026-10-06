@@ -37,6 +37,9 @@
     printer: '<path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/>',
     house: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
     transfer: '<path d="M4 8h14l-4-4"/><path d="M20 16H6l4 4"/>',
+    home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h5v-6h4v6h5V9.5"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    book: '<path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/>',
     unlock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.6-1.8"/>',
     eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     up: '<path d="m6 15 6-6 6 6"/>',
@@ -59,7 +62,7 @@
     listen: { recId: null, text: '', recording: false, interim: '', mode: 'check' },
   };
   if (!RS.STAFF.collectors.some((c) => c.id === S.collectorId)) S.collectorId = RS.STAFF.collectors[0].id;
-  const homeScreen = () => (RS.noStudy ? (S.role === 'SUPERVISOR' ? 'design' : 'nostudy') : S.role === 'SUPERVISOR' ? 'quality' : 'schedule');
+  const homeScreen = () => (RS.noStudy ? (S.role === 'SUPERVISOR' ? 'design' : 'nostudy') : S.role === 'SUPERVISOR' ? 'quality' : 'home');
   S.screen = homeScreen();
   // After publishing a design version the app restarts; return to the study design.
   try { if (sessionStorage.getItem('jamii.research.return') === 'design' && S.role === 'SUPERVISOR') S.screen = 'design'; sessionStorage.removeItem('jamii.research.return'); } catch (e) { /* private mode */ }
@@ -119,7 +122,10 @@
   /* Navigation                                                          */
   /* ------------------------------------------------------------------ */
   const openQueries = () => db.queries.filter((q) => q.status === 'open' && isMine(part(q.participantId)));
-  const myRows = () => RS.scheduleRows(db, P, null, 30).filter((r) => isMine(r.participant));
+  const myRows = () => RS.scheduleRows(db, P, null, 14).filter((r) => isMine(r.participant));
+  // Visits started and not finished (including screenings): Jamii's "Open visits".
+  const openVisits = () => db.visits.filter((r) => r.status === 'draft' && isMine(part(r.participantId))).map((r) => ({ rec: r, p: part(r.participantId) }))
+    .concat(db.participants.filter((p) => p.status === 'screening' && isMine(p) && !db.visits.some((r) => r.participantId === p.id && r.status === 'draft')).map((p) => ({ rec: null, p })));
   function navItems() {
     if (RS.noStudy) return [];
     const pending = db.messages.filter((m) => m.status === 'pending').length;
@@ -135,10 +141,15 @@
       items.push(['schedule', 'Schedule', 'calendar']);
       items.push(['messages', 'Messaging', 'message', pending]);
     } else {
-      items.push(['initial', 'Initial visit', 'plus', db.participants.filter((p) => p.status === 'screening' && isMine(p)).length]);
+      // The same menu as the Jamii clinical app.
+      items.push(['home', 'Home', 'home']);
+      items.push(['initial', 'Start visit', 'plus']);
       items.push(['records', 'Participant records', 'folder', openQueries().length]);
-      items.push(['schedule', 'Schedule', 'calendar', myRows().filter((r) => r.status !== 'upcoming').length]);
-      items.push(['messages', 'Messaging', 'message', suggestions().length]);
+      items.push(['open', 'Open visits', 'clock', openVisits().length]);
+      items.push(['schedule', 'Follow-ups', 'calendar', myRows().filter((r) => r.status !== 'upcoming').length]);
+      items.push(['messages', 'Messages', 'message', suggestions().length]);
+      items.push(['protocol', 'Study guide', 'book']);
+      return items;
     }
     items.push(['sep']);
     items.push(['protocol', 'Protocol', 'doc']);
@@ -146,7 +157,7 @@
   }
   function renderNav() {
     const u = me();
-    const active = { participant: 'records', visit: S.pid && part(S.pid) && part(S.pid).status === 'screening' ? 'initial' : 'records', visitview: 'records' }[S.screen] || S.screen;
+    const active = { participant: 'records', visit: isSup() ? 'records' : 'initial', visitview: 'records' }[S.screen] || S.screen;
     // The study's own tools sit apart from the day-to-day screens (supervisors only).
     const studyCard = isSup() ? `<div class="nav-card"><div class="nav-card-label">Study</div>
         ${[['design', 'Study design', 'flask', RS.study.draft() ? '!' : '', 'urgent'], ...(RS.noStudy ? [] : [['export', 'Export data', 'download']])].map(([id, label, ic, badge, tone]) => `
@@ -176,11 +187,11 @@
     document.body.dataset.role = S.role;
   }
 
-  const TITLES = { design: 'Study design', export: 'Export data', nostudy: 'No active study', initial: 'Initial visit', records: 'Participant records', participant: 'Participant', visit: 'Visit', visitview: 'Visit record', schedule: 'Schedule', messages: 'Messaging', quality: 'Data quality review', analysis: 'Analysis', protocol: 'Protocol' };
+  const TITLES = { home: 'Home', open: 'Open visits', design: 'Study design', export: 'Export data', nostudy: 'No active study', initial: 'Initial visit', records: 'Participant records', participant: 'Participant', visit: 'Visit', visitview: 'Visit record', schedule: 'Schedule', messages: 'Messaging', quality: 'Data quality review', analysis: 'Analysis', protocol: 'Protocol' };
   // Screens each view may open (the supervisor reviews; collectors run visits and message participants).
   const ALLOWED = {
     SUPERVISOR: RS.noStudy ? ['design'] : ['quality', 'analysis', 'records', 'participant', 'visitview', 'schedule', 'messages', 'protocol', 'design', 'export'],
-    COLLECTOR: RS.noStudy ? ['nostudy'] : ['initial', 'records', 'participant', 'visit', 'visitview', 'schedule', 'messages', 'protocol'],
+    COLLECTOR: RS.noStudy ? ['nostudy'] : ['home', 'open', 'initial', 'records', 'participant', 'visit', 'visitview', 'schedule', 'messages', 'protocol'],
   };
   function go(screen, opts) {
     if (S.listen.recording && screen !== 'visit') stopMic();
@@ -193,7 +204,8 @@
   }
   function render() {
     renderNav();
-    $('topTitle').textContent = TITLES[S.screen] || 'Jamii Research';
+    const COLLECTOR_TITLES = { initial: 'Start visit', schedule: 'Follow-ups', messages: 'Messages', protocol: 'Study guide' };
+    $('topTitle').textContent = (!isSup() && COLLECTOR_TITLES[S.screen]) || TITLES[S.screen] || 'Jamii Research';
     // The study name on every screen: only once a version is published.
     const chip = $('studyChip');
     if (chip) { chip.textContent = RS.noStudy ? 'No active study' : P.short || P.title; chip.classList.toggle('none', RS.noStudy); }
@@ -240,6 +252,29 @@
   const housemates = (cluster, exceptId) => db.participants.filter((x) => x.cluster === cluster && x.id !== exceptId && x.status !== 'screen_fail' && x.status !== 'declined').sort((a, b) => a.name.localeCompare(b.name));
   const houseLabel = (x) => `${x.name} (${pLabel(x)}${x.household ? ', ' + x.household : ''})`;
 
+  /** Start visit, as in Jamii: find a returning participant first (due visits on top), or register someone new. */
+  function returningCard() {
+    const q = (S.startQ || '').trim().toLowerCase();
+    const mine = db.participants.filter((p) => p.status === 'enrolled' && isMine(p));
+    const ORDER = { missed: 0, due: 1, upcoming: 2 };
+    // The same visits as Follow-ups (overdue, due now, coming up in the next 2 weeks).
+    const rows = myRows();
+    const list = mine.map((p) => { const x = rows.find((y) => y.participant.id === p.id); return { p, nx: x ? { v: x.visit, st: x.status } : null }; })
+      .filter(({ p }) => !q || [p.name, p.studyId, p.phone, clusterOf(p).name].some((x) => String(x || '').toLowerCase().includes(q)))
+      .sort((a, b) => (a.nx ? ORDER[a.nx.st] : 3) - (b.nx ? ORDER[b.nx.st] : 3) || a.p.name.localeCompare(b.p.name));
+    const shown = q ? list.slice(0, 12) : list.filter((x) => x.nx && x.nx.st !== 'upcoming').slice(0, 6);
+    const btn = ({ p, nx }) => {
+      if (!nx) return '<span class="small muted">No visit due</span>';
+      const draft = RS.draftRec(db, p.id, nx.v.id);
+      if (draft) return `<button class="btn sm primary" data-action="open-rec" data-rec="${draft.id}">Continue ${esc(nx.v.label)}</button>`;
+      if (nx.st === 'upcoming') return `<span class="small muted">${esc(nx.v.label)}: ${esc(RS.windowText(nx.st, RS.visitWindow(p, nx.v)))}</span>`;
+      return `<button class="btn sm ${nx.st === 'due' ? 'primary' : ''}" data-action="start-visit" data-pid="${p.id}" data-visit="${nx.v.id}">Start ${esc(nx.v.label)}${nx.st === 'missed' ? ' (late)' : ''}</button>`;
+    };
+    return `<div class="card"><div class="card-head"><h3>Returning participant</h3><span class="muted small">${mine.length} enrolled in your clusters</span></div>
+      <div class="search">${icon('search')}<input class="input" id="start-q" data-input="startq" value="${esc(S.startQ || '')}" placeholder="Search by name, study ID or phone" autocomplete="off"></div>
+      ${!q && shown.length ? '<p class="small muted" style="margin:8px 0 2px">Visits due now or overdue:</p>' : ''}
+      <div class="rows">${shown.map((x) => `<div class="row"><div class="who click" data-action="open-participant" data-pid="${x.p.id}" style="cursor:pointer"><strong>${esc(x.p.name)}</strong><span class="meta">${esc(pLabel(x.p))} · ${esc(clusterOf(x.p).name)}</span></div><div class="btn-row">${btn(x)}</div></div>`).join('') || `<p class="empty">${q ? 'No one matches.' : 'No visits due now.'}</p>`}</div></div>`;
+  }
   function screenInitial() {
     const p = S.pid && part(S.pid);
     if (p && p.status === 'screening') {
@@ -251,6 +286,8 @@
     const dup = d.name.trim().length > 3 ? db.participants.filter((x) => x.name.toLowerCase().includes(d.name.trim().toLowerCase().split(/\s+/).pop()) && (!d.cluster || x.cluster === d.cluster)) : [];
     const ok = d.name.trim() && d.sex && d.cluster && (d.dobMode === 'dob' ? d.dob : d.age);
     return `<div class="page narrow">
+      ${returningCard()}
+      <div class="split-label">Or a new participant</div>
       ${stepsHtml('identify')}
       ${inProgress.length ? `<div class="card"><div class="card-head"><h3>Screenings in progress</h3></div><div class="rows">${inProgress.map((x) => `
         <div class="row click" data-action="resume-screening" data-pid="${x.id}"><div class="who"><strong>${esc(x.name)}</strong><span class="meta">${esc(x.screeningNo)} · ${esc(clusterOf(x).name)} · started ${esc(D.fmt(x.screenedAt))}</span></div><span class="tag screening">${esc((STEPS.find(([id]) => id === x.wiz) || [])[1] || '')}</span></div>`).join('')}</div></div>` : ''}
@@ -371,14 +408,22 @@
       : S.missingOpen === f.id ? `<div class="missing-row"><span class="muted">Why is it missing?</span>${P.missingReasons.map((m) => `<button class="chip" data-action="set-missing" data-field="${f.id}" data-v="${esc(m)}">${esc(m)}</button>`).join('')}<button class="btn link" data-action="missing-cancel">Cancel</button></div>`
       : (v == null || v === '') ? `<div class="missing-row"><button class="btn link" data-action="missing-open" data-field="${f.id}">Can't get this?</button></div>` : '') : '';
     return `<div class="fld" id="fld-${f.id}">
-      <div class="fld-label">${esc(f.label)}${f.required && o.mode === 'visit' ? '<span class="req">*</span>' : ''}</div>
+      <div class="fld-label">${esc(f.label)}${f.required && o.mode === 'visit' ? '<span class="req">*</span>' : ''}${o.skippedNow ? ' <span class="tag">skipped for now</span>' : ''}</div>
       ${f.help ? `<div class="fld-help">${esc(f.help)}</div>` : ''}
       <div class="fld-input">${input}</div>
       ${c.hard ? `<div class="fld-msg err">${esc(c.hard)}</div>` : c.soft ? `<div class="fld-msg warn">${esc(c.soft)} If it is correct, it goes to the supervisor as a data query.</div>` : ''}
       ${showReq ? '<div class="fld-msg err">Required: enter a value or say why it is missing.</div>' : ''}
       ${heard}${missRow}
+      ${o.skippable ? `<button class="btn link skip-q" data-action="skip-q" data-field="${f.id}">Skip for now</button>` : ''}
     </div>`;
   }
+  // Questions used by a safety rule: never skipped from Ask next (as danger signs in Jamii).
+  const SAFETY_FIELDS = (() => {
+    const out = new Set();
+    const add = (tree) => (tree ? [...RS.rules.names(tree)] : []).forEach((n) => { if (out.has(n)) return; out.add(n); const d = (P.derivedById || {})[n]; if (d) add(d.tree); });
+    (P.safety || []).forEach((x) => add(x.tree));
+    return out;
+  })();
   const parseVal = (f, raw) => {
     if (f.type === 'number') { const t = String(raw).trim().replace(',', '.'); return t === '' ? '' : /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : t; }
     if (f.type === 'bp') return String(raw).replace(/\s*(over|\\)\s*/i, '/').trim();
@@ -413,6 +458,16 @@
     const inWizard = p.status === 'screening';
     const w = p.enrolledAt ? RS.visitWindow(p, vd) : null;
     const secDone = (s) => s.fields.every((f) => !f.required || (r.values[f.id] != null && r.values[f.id] !== '') || (r.missing || {})[f.id]);
+    // Ask next, as in Jamii: the next three unanswered questions in protocol order. "Skip for now" moves one
+    // to the end of the list (it stays required). Questions used by a safety rule can't be skipped.
+    const isOpen = (f) => (r.values[f.id] == null || r.values[f.id] === '') && !(r.missing || {})[f.id];
+    const all = sections.flatMap((x) => x.fields);
+    const openQs = all.filter(isOpen);
+    const skipped = (r.skipped || []).filter((id) => openQs.some((f) => f.id === id));
+    const notSkipped = openQs.filter((f) => !skipped.includes(f.id));
+    const next = (notSkipped.length ? notSkipped : openQs).slice(0, 3);
+    const nextIds = new Set(next.map((f) => f.id));
+    const sectionOf = (f) => sections.find((x) => x.fields.includes(f)).form;
     return `<div class="page">
       ${inWizard ? stepsHtml('baseline') : crumbs(p)}
       <div class="card"><div class="p-head"><div class="avatar">${esc(initials(p.name))}</div><div style="flex:1">
@@ -424,12 +479,14 @@
       ${alertsHtml(safety)}
       <div class="visit-layout ${canListen ? '' : 'solo'}">
         <div>
+          <div class="q-progress"><span class="muted"><b>${openQs.length}</b> to go · ${all.length - openQs.length} answered</span></div>
+          ${next.length ? `<div class="next-block"><div class="next-label">Ask next</div>${next.map((f, i) => `${i === 0 || sectionOf(next[i - 1]) !== sectionOf(f) ? `<div class="next-from small muted">${esc(sectionOf(f).title)}</div>` : ''}${fieldHtml(f, r.values, { mode: 'visit', rec: r, heard: heard[f.id], skippable: notSkipped.length > 1 && !skipped.includes(f.id) && !SAFETY_FIELDS.has(f.id), skippedNow: skipped.includes(f.id) })}`).join('')}</div>` : `<div class="alert info">${icon('check')}<div>Every question has an answer or a reason it is missing. Check below, then complete the visit.</div></div>`}
           <div class="form-nav">${sections.map((s) => `<button class="${probs.size && s.fields.some((f) => probs.has(f.id)) && S.tried ? 'problem' : secDone(s) ? 'complete' : ''}" data-action="goto" data-target="sec-${s.form.id}">${secDone(s) ? '✓ ' : ''}${esc(s.form.title)}</button>`).join('')}</div>
           ${sections.map((s) => `<div class="card fsec" id="sec-${s.form.id}">
             <h3>${esc(s.form.title)}${s.form.sensitive ? `<span class="tag report">${icon('lock')}Sensitive</span>` : ''}${s.form.noListening && canListen ? '<span class="tag">Not listened to</span>' : ''}</h3>
             ${s.form.source ? `<div class="src">${esc(s.form.source)}</div>` : ''}
             ${s.form.intro ? `<div class="intro">${esc(s.form.intro)}</div>` : ''}
-            ${s.fields.map((f) => fieldHtml(f, r.values, { mode: 'visit', rec: r, heard: heard[f.id] })).join('')}
+            ${s.fields.filter((f) => !nextIds.has(f.id)).map((f) => fieldHtml(f, r.values, { mode: 'visit', rec: r, heard: heard[f.id], skippedNow: skipped.includes(f.id) })).join('') || '<p class="small muted">In Ask next above.</p>'}
           </div>`).join('')}
           ${derivedCard(derived, r.values)}
           <div class="visit-foot">
@@ -672,6 +729,45 @@
   /* ------------------------------------------------------------------ */
   /* Schedule                                                            */
   /* ------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------ */
+  /* Data collector: Home and Open visits (as in the Jamii clinical app)  */
+  /* ------------------------------------------------------------------ */
+  const miniRow = (x) => {
+    const p = x.participant;
+    const tone = { missed: 'overdue', due: 'today', upcoming: '' }[x.status];
+    return `<button class="mini-row" data-action="open-participant" data-pid="${p.id}"><span class="mini-icon">${icon('calendar')}</span>
+      <span class="mini-main"><strong>${esc(p.name)}</strong><span>${esc(x.visit.label)} · ${esc(pLabel(p))}</span></span>
+      <span class="due ${tone}">${esc(x.status === 'missed' ? 'Overdue' : RS.windowText(x.status, x.window))}</span></button>`;
+  };
+  const openRow = ({ rec: r, p }) => `<button class="mini-row" data-action="${r ? 'open-rec' : 'resume-screening'}" ${r ? `data-rec="${r.id}"` : `data-pid="${p.id}"`}><span class="avatar sm">${esc(initials(p.name))}</span>
+      <span class="mini-main"><strong>${esc(p.name)}</strong><span>${r ? `${esc((visitDef(r.visit) || { label: r.visit }).label)} · started ${esc(D.fmt(r.date))}` : 'Screening in progress'}</span></span>
+      <span class="tag ${r ? 'due' : 'screening'}">${r ? 'In progress' : 'Screening'}</span></button>`;
+  function screenHome() {
+    const u = me();
+    const rows = myRows();
+    const over = rows.filter((x) => x.status === 'missed'), due = rows.filter((x) => x.status === 'due');
+    const opens = openVisits();
+    const qs = openQueries();
+    return `<div class="page">
+      <div class="home-hero"><div><h1>Good day, ${esc(u.name.split(' ')[0])}</h1><p class="muted">${esc(u.role)} · ${esc(P.short || P.title)} · ${esc(me().clusters.map((id) => (P.clusters.find((c) => c.id === id) || { name: id }).name).join(', '))}</p></div>
+        <button class="btn primary xl" data-action="go" data-screen="initial">${icon('plus')} Start visit</button></div>
+      ${qs.length ? `<div class="alert warn">${icon('alert')}<div><strong>${qs.length} data quer${qs.length === 1 ? 'y' : 'ies'} from your supervisor</strong><button class="btn link" data-action="go" data-screen="records">Answer in Participant records</button></div></div>` : ''}
+      <div class="grid-3">
+        <div class="card"><div class="card-head"><h3>${icon('calendar')} Follow-ups</h3><button class="btn link" data-action="go" data-screen="schedule">See all</button></div>
+          <p class="small">${over.length ? `<span class="due overdue">${over.length} overdue</span> ` : ''}<span class="due today">${due.length} due now</span></p>
+          ${over.concat(due).slice(0, 4).map(miniRow).join('') || '<p class="empty">Nothing due.</p>'}</div>
+        <div class="card"><div class="card-head"><h3>${icon('clock')} Open visits</h3><button class="btn link" data-action="go" data-screen="open">See all</button></div>
+          ${opens.slice(0, 4).map(openRow).join('') || '<p class="empty">No visits in progress.</p>'}</div>
+        <div class="card"><div class="card-head"><h3>${icon('book')} Study guide</h3><button class="btn link" data-action="go" data-screen="protocol">Open</button></div>
+          <p class="small muted">${esc(P.title)}</p><p class="small">Visits, questions and what to do when a safety rule fires.</p></div>
+      </div></div>`;
+  }
+  function screenOpen() {
+    const opens = openVisits();
+    return `<div class="page"><p class="muted">Visits you started and haven't finished, and screenings in progress. Tap one to continue.</p>
+      <div class="card">${opens.map(openRow).join('') || '<p class="empty">No visits in progress.</p>'}</div></div>`;
+  }
+
   function screenSchedule() {
     const rows = isSup() ? RS.scheduleRows(db, P, null, 30).filter((x) => inScope(x.participant)) : myRows();
     const row = (x) => {
@@ -688,14 +784,14 @@
     };
     const groups = S.groupBy === 'cluster'
       ? P.clusters.filter((c) => rows.some((x) => x.participant.cluster === c.id)).map((c) => ({ title: c.name, sub: [clusterArm(c), collectorName(c.id)].filter(Boolean).join(' · '), items: rows.filter((x) => x.participant.cluster === c.id) }))
-      : [['missed', 'Window closed', 'Not done in time: doing it now is recorded as a protocol deviation'], ['due', 'Due now', 'Window open today'], ['upcoming', 'Coming up', 'Window opens in the next 30 days']].map(([k, t, sub]) => ({ title: t, sub, tag: k, items: rows.filter((x) => x.status === k) }));
+      : [['missed', 'Overdue', 'Window closed: doing it now is recorded as a protocol deviation'], ['due', 'Due now', 'Window open today'], ['upcoming', isSup() ? 'Coming up' : 'Coming up in the next 2 weeks', isSup() ? 'Window opens in the next 30 days' : '']].map(([k, t, sub]) => ({ title: t, sub, tag: k, items: rows.filter((x) => x.status === k) }));
     return `<div class="page">
       ${isSup() ? filterBar() : ''}
-      <div class="btn-row" style="justify-content:space-between;margin-bottom:6px"><div class="tabs" style="margin:0">${[['status', 'By status'], ['cluster', 'By cluster']].map(([k, l]) => `<button class="${S.groupBy === k ? 'on' : ''}" data-action="group-by" data-v="${k}">${l}</button>`).join('')}</div>
+      <div class="btn-row" style="justify-content:space-between;margin-bottom:6px"><div class="tabs" style="margin:0">${[['status', isSup() ? 'By status' : 'By date'], ['cluster', 'By cluster']].map(([k, l]) => `<button class="${S.groupBy === k ? 'on' : ''}" data-action="group-by" data-v="${k}">${l}</button>`).join('')}</div>
         <span class="muted small">${isSup() ? 'Read only · ' : `${esc(me().clusters.map((id) => P.clusters.find((c) => c.id === id).name).join(' and '))} · `}Today ${esc(D.fmtLong(D.today()))}</span></div>
       ${groups.map((g) => `<div class="group-head">${g.tag ? `<span class="tag ${g.tag}">${g.items.length}</span>` : `<span class="tag">${g.items.length}</span>`}${esc(g.title)}<span class="muted small" style="font-weight:600">${esc(g.sub)}</span></div>
         <div class="rows">${g.items.map(row).join('') || '<p class="empty">Nothing here.</p>'}</div>`).join('')}
-      ${!rows.length ? '<p class="empty">No visits are due in the next 30 days.</p>' : ''}
+      ${!rows.length ? `<p class="empty">No visits are due in the next ${isSup() ? '30 days' : '2 weeks'}.</p>` : ''}
     </div>`;
   }
 
@@ -1054,7 +1150,7 @@
     me: () => me(), getDb: () => db, setDb: (x) => { db = x; save(); },
     resetAll: () => { RS.study.resetDemo(); try { localStorage.removeItem(RS.STORE_KEY); } catch (e) { /* private mode */ } location.reload(); },
   });
-  const SCREENS = { design: DZ.screens.design, export: DZ.screens.export, nostudy: screenNoStudy, initial: screenInitial, records: screenRecords, participant: screenParticipant, visit: screenVisit, visitview: screenVisitView, schedule: screenSchedule, messages: screenMessages, quality: screenQuality, analysis: screenAnalysis, protocol: screenProtocol };
+  const SCREENS = { home: screenHome, open: screenOpen, design: DZ.screens.design, export: DZ.screens.export, nostudy: screenNoStudy, initial: screenInitial, records: screenRecords, participant: screenParticipant, visit: screenVisit, visitview: screenVisitView, schedule: screenSchedule, messages: screenMessages, quality: screenQuality, analysis: screenAnalysis, protocol: screenProtocol };
 
   /* ------------------------------------------------------------------ */
   /* Modals                                                              */
@@ -1347,6 +1443,7 @@
       if (r && el.dataset.mode !== 'screen') { delete r.missing[el.dataset.field]; delete r.checks[el.dataset.field]; }
       save(); render();
     },
+    'skip-q': (el) => { const r = rec(S.recId); r.skipped = [...new Set([...(r.skipped || []), el.dataset.field])]; save(); render(); toast('Skipped for now. It stays on the list and still needs an answer or a reason.'); },
     'missing-open': (el) => { S.missingOpen = el.dataset.field; render(); },
     'missing-cancel': () => { S.missingOpen = null; render(); },
     'set-missing': (el) => { const r = rec(S.recId); r.missing[el.dataset.field] = el.dataset.v; delete r.values[el.dataset.field]; S.missingOpen = null; save(); render(); },
@@ -1509,7 +1606,7 @@
     h(el, e);
   });
   // Belt and braces: the buttons are hidden in the other view too.
-  const COLLECTOR_ONLY = new Set(['start-screening', 'start-visit', 'confirm-late', 'complete-visit', 'confirm-complete', 'withdraw', 'confirm-withdraw', 'consent-change', 'confirm-consent-change', 'remind', 'compose-to', 'compose-send', 'sug-send', 'sug-edit', 'answer-query', 'referral-outcome', 'confirm-outcome', 'household', 'confirm-household', 'resume-screening']);
+  const COLLECTOR_ONLY = new Set(['skip-q', 'start-screening', 'start-visit', 'confirm-late', 'complete-visit', 'confirm-complete', 'withdraw', 'confirm-withdraw', 'consent-change', 'confirm-consent-change', 'remind', 'compose-to', 'compose-send', 'sug-send', 'sug-edit', 'answer-query', 'referral-outcome', 'confirm-outcome', 'household', 'confirm-household', 'resume-screening']);
   const SUPERVISOR_ONLY = new Set(['raise-query', 'confirm-query', 'close-query', 'reopen-query', 'correct', 'confirm-correct', 'mark-reviewed', 'assess-event', 'confirm-assess', 'msg-approve', 'msg-reject', 'export']);
   Object.assign(handlers, DZ.handlers);
   document.addEventListener('input', (e) => {
@@ -1521,6 +1618,7 @@
     if (k === 'id') { S.idDraft[el.dataset.k] = el.value; render(); }
     else if (k === 'consent') { part(S.pid).consentDraft[el.dataset.k] = el.value; save(); render(); }
     else if (k === 'q') { S.q = el.value; render(); }
+    else if (k === 'startq') { S.startQ = el.value; render(); }
     else if (k === 'modal') { S.modal[el.dataset.k] = el.value; renderModal(); const n = $(el.id); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }
     else if (k === 'compose-text') { S.compose.text = el.value; render(); }
     else if (k === 'transcript') { S.listen.recId = S.recId; S.listen.text = el.value; render(); }
