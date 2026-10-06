@@ -552,7 +552,7 @@
         <div class="btn-row"><button class="btn sm" data-action="view-handoff" data-ref="${x.id}">${icon('printer')} Handoff</button>${!isSup() && x.status === 'open' ? `<button class="btn sm primary" data-action="referral-outcome" data-ref="${x.id}">Record outcome</button>` : ''}</div></div>`;
     }).join('')}</div></div>`;
   }
-  const auditRow = (a) => { const f = P.fields[a.field]; return `<tr><td>${esc(fmtDT(a.at))}</td><td>${esc(a.by)}</td><td>${a.field ? `${esc(f ? f.label : a.field)}: <s>${esc(fmtValue(f, a.from))}</s> → <b>${esc(fmtValue(f, a.to))}</b>` : esc(a.what || '')}</td><td class="muted">${esc(a.reason || '')}</td></tr>`; };
+  const auditRow = (a) => { const f = P.fields[a.field]; return `<tr><td>${esc(fmtDT(a.at))}</td><td>${esc(a.by)}</td><td>${a.field ? `${esc(f ? f.label : a.field)}: <s>${esc(fmtValue(f, a.from))}</s> → <b>${esc(fmtValue(f, a.to))}</b>` : esc(a.what || '')}${a.armId ? `: <b>${esc(armShownId(a.armId))}</b>` : ''}</td><td class="muted">${esc(a.reason || '')}</td></tr>`; };
   function queryHtml(q) {
     return `<div class="thread" style="margin-top:6px"><div><span class="tag ${q.status}">Query · ${esc(q.status)}</span> <b>${esc(q.by)}</b> ${esc(fmtDT(q.raisedAt))}<br>${esc(q.text)}</div>
       ${q.thread.map((t) => `<div><b>${esc(t.by)}</b> ${esc(fmtDT(t.at))}<br>${esc(t.text)}</div>`).join('')}
@@ -1328,7 +1328,8 @@
         const a = RS.study.assignArm(db, P, p, { collectorId: S.collectorId, chosen: c.arm, reason: c.armReason });
         p.arm = a.arm;
         p.allocation = { how: a.how, slot: a.slot || null, reason: a.reason || '', at: new Date().toISOString(), by: me().name, designVersion: P.designVersion || '' };
-        RS.audit(db, { by: me().name, participantId: p.id, what: `Assigned to ${RS.study.armLabel(P, a.arm)} (${RS.study.METHODS[a.how] ? RS.study.METHODS[a.how].label : a.how}${a.slot ? ', allocation ' + a.slot : ''})`, reason: a.reason || '' });
+        // The arm is kept as an id and shown per the study's blinding setting, never written into the text.
+        RS.audit(db, { by: me().name, participantId: p.id, what: `Assigned to an arm (${RS.study.METHODS[a.how] ? RS.study.METHODS[a.how].label : a.how}${a.slot ? ', allocation ' + a.slot : ''})`, armId: a.arm, reason: a.reason || '' });
       }
       delete p.consentDraft;
       p.wiz = 'baseline';

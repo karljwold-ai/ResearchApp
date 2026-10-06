@@ -58,6 +58,8 @@
       d.assignment = { method: names.length > 1 ? 'cluster' : 'single', visible: 'all', collectorArms: {}, blockSizes: [4, 6] };
     }
     d.retired = d.retired || [];
+    // The study team: data collectors and the clusters they work in.
+    if (!d.collectors) d.collectors = clone(((RS.STAFF && RS.STAFF.collectors) || []).map((c) => ({ id: c.id, name: c.name, role: c.role, clusters: c.clusters || [] })));
     return d;
   }
 
@@ -160,6 +162,7 @@
       arms: [{ id: 'arm1', name: '' }],
       assignment: { method: 'single', visible: 'all', collectorArms: {}, blockSizes: [4, 6] },
       clusters: areas.map((id, i) => ({ id, name: 'Area ' + (i + 1), armId: 'arm1' })),
+      collectors: ((RS.STAFF && RS.STAFF.collectors) || []).map((c) => ({ id: c.id, name: c.name, role: c.role, clusters: (c.clusters || []).slice() })),
       screening: { title: 'Screening', fields: [] }, eligibility: [],
       consent: { version: 'Consent v1', language: 'English', method: 'Written consent', sections: [], checks: [], options: [{ id: 'contact', text: 'You may contact me between visits', default: true }] },
       visits: [{ id: 'baseline', label: 'Baseline', day: 0, forms: [] }],
@@ -302,6 +305,30 @@
     (d.clusters || []).forEach((c) => { if (c.armId === arm) c.armId = d.arms[0].id; });
     Object.keys(d.assignment.collectorArms || {}).forEach((k) => { if (d.assignment.collectorArms[k] === arm) d.assignment.collectorArms[k] = d.arms[0].id; });
   }
+  /* ---- Clusters and data collectors ---- */
+  function addCluster(d) {
+    let n = (d.clusters || []).length + 1;
+    while ((d.clusters || []).some((c) => c.id === 'cl' + n)) n++;
+    d.clusters = d.clusters || [];
+    d.clusters.push({ id: 'cl' + n, name: '', armId: d.arms[0].id });
+    return 'cl' + n;
+  }
+  function removeCluster(d, id) {
+    d.clusters = d.clusters.filter((c) => c.id !== id);
+    (d.collectors || []).forEach((c) => { c.clusters = (c.clusters || []).filter((x) => x !== id); });
+  }
+  function addCollector(d) {
+    d.collectors = d.collectors || [];
+    let n = d.collectors.length + 1;
+    while (d.collectors.some((c) => c.id === 'c' + n)) n++;
+    d.collectors.push({ id: 'c' + n, name: '', role: 'Data collector', clusters: [] });
+    return 'c' + n;
+  }
+  function removeCollector(d, id) {
+    d.collectors = d.collectors.filter((c) => c.id !== id);
+    if (d.assignment.collectorArms) delete d.assignment.collectorArms[id];
+  }
+
   /** A new arm has the shared visits, asking no sections where arms differ (copy a schedule to fill it). */
   function addArm(d) {
     let n = d.arms.length + 1;
@@ -362,7 +389,22 @@
     const am = a.assignment || {}, bm = b.assignment || {};
     if (am.method !== bm.method) add('change', `Assignment: ${(METHODS[am.method] || {}).label || '—'} → ${METHODS[bm.method].label}`);
     if (am.visible !== bm.visible) add('change', `Who sees the arm: ${(VISIBILITY[am.visible] || {}).label || '—'} → ${VISIBILITY[bm.visible].label}`);
-    (b.clusters || []).forEach((c) => { const o = (a.clusters || []).find((x) => x.id === c.id); if (o && o.armId !== c.armId) add('change', `${c.name} moves to ${armLabel(b, c.armId)}`); if (o && o.name !== c.name) add('change', `Cluster renamed: ${o.name} → ${c.name}`); });
+    (b.clusters || []).forEach((c) => {
+      const o = (a.clusters || []).find((x) => x.id === c.id);
+      if (!o) { add('add', `New cluster: ${c.name || '(no name)'}${bm.method === 'cluster' ? ` (${armLabel(b, c.armId)})` : ''}`); return; }
+      if (o.armId !== c.armId && bm.method === 'cluster') add('change', `${c.name} moves to ${armLabel(b, c.armId)}`);
+      if (o.name !== c.name) add('change', `Cluster renamed: ${o.name} → ${c.name}`);
+    });
+    (a.clusters || []).forEach((c) => { if (!(b.clusters || []).some((x) => x.id === c.id)) add('remove', `Cluster removed: ${c.name}`); });
+    const cname = (d, id) => ((d.clusters || []).find((c) => c.id === id) || { name: id }).name;
+    (b.collectors || []).forEach((c) => {
+      const o = (a.collectors || []).find((x) => x.id === c.id);
+      if (!o) { add('add', `New data collector: ${c.name || '(no name)'}${(c.clusters || []).length ? ', working in ' + c.clusters.map((x) => cname(b, x)).join(', ') : ''}`); return; }
+      if (o.name !== c.name) add('change', `Data collector renamed: ${o.name} → ${c.name}`);
+      const was = (o.clusters || []).slice().sort().join(), now = (c.clusters || []).slice().sort().join();
+      if (was !== now) add('change', `${c.name} now works in ${(c.clusters || []).map((x) => cname(b, x)).join(', ') || 'no cluster'}`);
+    });
+    (a.collectors || []).forEach((c) => { if (!(b.collectors || []).some((x) => x.id === c.id)) add('remove', `Data collector removed: ${c.name}`); });
 
     Object.entries(b.forms).forEach(([fid, fm]) => {
       const o = a.forms[fid];
@@ -462,17 +504,19 @@
     try {
       RS.registerProtocol(toRuntime(l.design, l.version));
       RS.activeProtocol = l.design.id;
+      if (RS.STAFF && l.design.collectors && l.design.collectors.length) RS.STAFF.collectors = clone(l.design.collectors);
     } catch (e) {
       RS.studyError = e.message; // the protocol file version keeps running
     }
   }());
 
-  RS.armName = (id) => armLabel(RS.protocol(), id);
+  // The arm as a supervisor may see it: a code ("Arm A") in a blinded study.
+  RS.armName = (id) => armShown(RS.protocol(), id, 'SUPERVISOR');
   RS.study = {
     METHODS, VISIBILITY, TYPES, DEMO_PASSWORD,
     state: () => state, latest, current: () => state.draft || (latest() && latest().design), draft: () => state.draft,
     save: () => save(state), clone, fromProtocol, blankDesign, toRuntime, check, armLabel, armShown, assignArm, allocationList,
-    newId, newFormId, usedIds, publishedIds, removeField, visitArms, setVisitForm, setVisitArm, copySchedule, scheduleOfForm, duplicateForm, removeArm, addArm, tidyVisit, removeForm, changes, nextVersion, unlock, publish, discard, startBlank, resetDemo,
+    newId, newFormId, usedIds, publishedIds, removeField, visitArms, setVisitForm, setVisitArm, copySchedule, scheduleOfForm, duplicateForm, removeArm, addArm, tidyVisit, addCluster, removeCluster, addCollector, removeCollector, removeForm, changes, nextVersion, unlock, publish, discard, startBlank, resetDemo,
   };
   if (typeof module !== 'undefined') module.exports = RS.study;
 }());

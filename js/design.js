@@ -158,8 +158,8 @@
       const armSel = (k, attrs, val) => `<select class="input" data-change="dz" data-k="${k}" ${attrs} ${dis()}>${D.arms.map((x) => `<option value="${x.id}" ${val === x.id ? 'selected' : ''}>${esc(armLabel(D, x.id))}</option>`).join('')}</select>`;
       const counts = Object.fromEntries(D.arms.map((x) => [x.id, db.participants.filter((p) => p.enrolledAt && RS.armOf(p) === x.id).length]));
       let how = '';
-      if (a.method === 'cluster') how = `<table class="tbl"><thead><tr><th>Cluster</th><th>Arm</th></tr></thead><tbody>${(D.clusters || []).map((c) => `<tr><td><input class="input" id="dz-cl-${c.id}" data-input="dz" data-k="cluster-name" data-cluster="${c.id}" value="${esc(c.name)}" ${dis()}></td><td>${armSel('cluster-arm', `data-cluster="${c.id}"`, c.armId)}</td></tr>`).join('')}</tbody></table>`;
-      if (a.method === 'collector') how = `<table class="tbl"><thead><tr><th>Data collector</th><th>Arm</th></tr></thead><tbody>${RS.STAFF.collectors.map((c) => `<tr><td>${esc(c.name)}</td><td>${armSel('collector-arm', `data-collector="${c.id}"`, (a.collectorArms || {})[c.id] || D.arms[0].id)}</td></tr>`).join('')}</tbody></table>`;
+      if (a.method === 'cluster') how = '<p class="small muted">Set each cluster’s arm under <b>Clusters and data collectors</b> below.</p>';
+      if (a.method === 'collector') how = '<p class="small muted">Set each data collector’s arm under <b>Clusters and data collectors</b> below.</p>';
       if (a.method === 'random') how = `<label><span class="lbl">Block sizes</span><input class="input" id="dz-blocks" data-input="dz" data-k="blocks" value="${esc((a.blockSizes || []).join(', '))}" ${dis()}></label>
         <p class="small muted">Blocks of these sizes, in a random order, keep the arms balanced without making the next allocation predictable. In a real study the statistician provides the allocation list and loads it on each tablet; this demo makes one on the tablet. ${db.allocation ? `${db.allocation.next} of ${db.allocation.list.length} slots used on this tablet.` : ''}</p>`;
       if (a.method === 'chosen') how = '<div class="alert warn">' + icon('alert') + '<div>Choosing the arm by hand can bias the results. Use it only for designs that are not randomised. The data collector records a reason, which goes in the audit trail.</div></div>';
@@ -171,7 +171,30 @@
           <div class="method-grid">${Object.entries(St.METHODS).map(([k, m]) => methodCard('dz-method', k, m, a.method === k)).join('')}</div>
           ${how}</div>
         <div class="card"><h3>Who can see the arm</h3>
-          <div class="method-grid three">${Object.entries(St.VISIBILITY).map(([k, m]) => methodCard('dz-visible', k, m, a.visible === k)).join('')}</div></div>`;
+          <div class="method-grid three">${Object.entries(St.VISIBILITY).map(([k, m]) => methodCard('dz-visible', k, m, a.visible === k)).join('')}</div></div>
+        ${teamCard(D, armSel)}`;
+    }
+    /** Clusters (or sites) and the data collectors who work in them. */
+    function teamCard(D, armSel) {
+      const a = D.assignment, db = ui.getDb();
+      const clusters = D.clusters || [], cols = D.collectors || [];
+      const inCluster = (id) => db.participants.filter((p) => p.cluster === id && p.status !== 'screen_fail' && p.status !== 'declined').length;
+      const byCol = (c) => db.visits.filter((r) => r.collector === c.name).length;
+      return `<div class="card"><h3>Clusters and data collectors</h3>
+        <p class="small muted">Clusters are the villages, areas or sites where participants live; each participant belongs to one. Data collectors see the participants in the clusters they work in.</p>
+        <div class="tbl-wrap"><table class="tbl dz-team"><thead><tr><th>Cluster or site</th>${a.method === 'cluster' ? '<th>Arm</th>' : ''}<th>Participants</th><th></th></tr></thead><tbody>
+          ${clusters.map((c) => `<tr><td><input class="input wide" id="dz-cl-${c.id}" data-input="dz" data-k="cluster-name" data-cluster="${c.id}" value="${esc(c.name)}" placeholder="Name" ${dis()}></td>${a.method === 'cluster' ? `<td>${armSel('cluster-arm', `data-cluster="${c.id}"`, c.armId)}</td>` : ''}<td>${inCluster(c.id)}</td>
+            <td>${editing() ? `<button class="icon-btn" data-action="dz-del-cluster" data-cluster="${c.id}" aria-label="Remove cluster">${icon('x')}</button>` : ''}</td></tr>`).join('') || `<tr><td colspan="4" class="muted small">No clusters yet.</td></tr>`}
+        </tbody></table></div>
+        ${editing() ? `<button class="btn" data-action="dz-add-cluster">${icon('plus')} Add a cluster or site</button>` : ''}
+        <div class="tbl-wrap" style="margin-top:14px"><table class="tbl dz-team"><thead><tr><th>Data collector</th><th>Works in</th>${a.method === 'collector' ? '<th>Arm</th>' : ''}<th></th></tr></thead><tbody>
+          ${cols.map((c) => `<tr><td><input class="input wide" id="dz-col-${c.id}" data-input="dz" data-k="collector-name" data-collector="${c.id}" value="${esc(c.name)}" placeholder="Name" ${dis()}></td>
+            <td>${clusters.map((cl) => editing() ? `<label class="check inline"><input type="checkbox" data-action="dz-col-cluster" data-collector="${c.id}" data-cluster="${cl.id}" ${(c.clusters || []).includes(cl.id) ? 'checked' : ''}><span>${esc(cl.name || 'Unnamed')}</span></label>` : (c.clusters || []).includes(cl.id) ? `<span class="tag">${esc(cl.name)}</span> ` : '').join('') || '<span class="muted small">Add clusters first</span>'}</td>
+            ${a.method === 'collector' ? `<td>${armSel('collector-arm', `data-collector="${c.id}"`, (a.collectorArms || {})[c.id] || D.arms[0].id)}</td>` : ''}
+            <td>${editing() ? `<button class="icon-btn" data-action="dz-del-collector" data-collector="${c.id}" aria-label="Remove data collector">${icon('x')}</button>` : ''}</td></tr>`).join('') || `<tr><td colspan="4" class="muted small">No data collectors yet.</td></tr>`}
+        </tbody></table></div>
+        ${editing() ? `<button class="btn" data-action="dz-add-collector">${icon('plus')} Add a data collector</button>` : ''}
+        <p class="small muted">Sign-in isn't connected in this prototype: data collectors are picked from the menu at the top. ${cols.length ? '' : 'Add at least one before publishing.'}</p></div>`;
     }
     /** An option card: a button while editing; when locked, plain text (readable) with the chosen one marked. */
     function methodCard(action, k, m, on) {
@@ -307,6 +330,12 @@
         const ch = St.changes(db);
         const problems = St.check(St.draft());
         const empty = !Object.values(St.draft().forms).some((f) => f.fields.length);
+        const team = [];
+        if (!(St.draft().clusters || []).length) team.push('Add at least one cluster or site (Arms and assignment).');
+        if ((St.draft().clusters || []).some((c) => !c.name.trim())) team.push('Every cluster needs a name.');
+        if (!(St.draft().collectors || []).length) team.push('Add at least one data collector (Arms and assignment).');
+        if ((St.draft().collectors || []).some((c) => !c.name.trim())) team.push('Every data collector needs a name.');
+        problems.push(...team);
         const groups = [['add', 'Added', 'ok'], ['change', 'Changed', ''], ['remove', 'Removed', 'warn']];
         const ok = !problems.length && !empty && (m.reason || '').trim();
         return `<div class="modal-card wide">${head(l ? `Publish version ${St.nextVersion()}?` : 'Lock and publish version 1.0?')}
@@ -384,6 +413,25 @@
         if (n) { ui.toast(`${armLabel(D, last.id)} has ${plural(n, 'participant')}: it can't be removed.`); return; }
         St.removeArm(D, last.id);
         if (S.dz.sarm === last.id) S.dz.sarm = 'all';
+        changed();
+      },
+      'dz-add-cluster': () => { const id = St.addCluster(d()); changed(); const n = document.getElementById('dz-cl-' + id); if (n) n.focus(); },
+      'dz-del-cluster': (el) => {
+        const n = ui.getDb().participants.filter((p) => p.cluster === el.dataset.cluster).length;
+        if (n) { ui.toast(`This cluster has ${plural(n, 'participant')}: it can't be removed.`); return; }
+        St.removeCluster(d(), el.dataset.cluster); changed();
+      },
+      'dz-add-collector': () => { const id = St.addCollector(d()); changed(); const n = document.getElementById('dz-col-' + id); if (n) n.focus(); },
+      'dz-del-collector': (el) => {
+        const D = d(), c = D.collectors.find((x) => x.id === el.dataset.collector);
+        if (D.collectors.length <= 1) { ui.toast('A study needs at least one data collector.'); return; }
+        const n = ui.getDb().visits.filter((r) => r.collector === c.name).length;
+        if (n) { ui.toast(`${c.name} has ${plural(n, 'visit')} recorded: they can't be removed.`); return; }
+        St.removeCollector(D, c.id); changed();
+      },
+      'dz-col-cluster': (el) => {
+        const c = d().collectors.find((x) => x.id === el.dataset.collector);
+        c.clusters = el.checked ? [...new Set([...(c.clusters || []), el.dataset.cluster])] : (c.clusters || []).filter((x) => x !== el.dataset.cluster);
         changed();
       },
       'dz-method': (el) => { if (!editing()) return; d().assignment.method = el.dataset.v; changed(); },
@@ -492,6 +540,7 @@
       else if (k === 'arm-name') D.arms.find((a) => a.id === el.dataset.arm).name = v;
       else if (k === 'form-title') D.forms[el.dataset.form].title = v;
       else if (k === 'cluster-name') D.clusters.find((c) => c.id === el.dataset.cluster).name = v;
+      else if (k === 'collector-name') D.collectors.find((c) => c.id === el.dataset.collector).name = v;
       else if (k === 'blocks') D.assignment.blockSizes = v.split(/[,\s]+/).map(Number).filter((x) => x > 0);
       else if (k === 'visit') {
         const vis = D.visits[Number(el.dataset.i)], p = el.dataset.prop;

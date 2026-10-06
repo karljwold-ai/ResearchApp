@@ -69,6 +69,12 @@ programming.
   an allocation list of shuffled blocks. The arm is fixed at consent, before the baseline visit, and
   recorded with how it was decided and the design version.
 - **Who sees the arm**: everyone, supervisors only (“Arm hidden” for collectors), or no one (“Arm A”).
+  This applies everywhere the arm appears, including the record's change history and the exports.
+- **Clusters and data collectors** (on *Arms and assignment*): add, rename and remove clusters or
+  sites (with their arm when assigning by cluster), and data collectors with the clusters they work
+  in (and their arm when assigning by data collector). They are part of the design, so a new data
+  collector or cluster goes live when the next version is published. A cluster with participants,
+  or a data collector with recorded visits, can't be removed.
 - **Lock and versions**: the design is locked. The lock at the top unlocks it after a confirmation
   and the supervisor password (**demo: 000000**). Changes are made in a **draft**; data collectors
   keep the published version until the draft is published. **Review and publish** lists every change

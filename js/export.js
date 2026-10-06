@@ -101,7 +101,7 @@
     const rows = [['time', 'by', 'participant', 'visit_record', 'field', 'from', 'to', 'what', 'reason']];
     db.audit.forEach((a) => {
       const p = a.participantId ? db.participants.find((x) => x.id === a.participantId) : null;
-      rows.push([a.at, a.by, p ? p.studyId || p.screeningNo : '', a.visitRecId || '', a.field || '', a.from == null ? '' : a.from, a.to == null ? '' : a.to, a.what || '', a.reason || '']);
+      rows.push([a.at, a.by, p ? p.studyId || p.screeningNo : '', a.visitRecId || '', a.field || '', a.from == null ? '' : a.from, a.to == null ? '' : a.to, (a.what || '') + (a.armId && RS.armName ? ': ' + RS.armName(a.armId) : ''), a.reason || '']);
     });
     return RS.toCSV(rows);
   }

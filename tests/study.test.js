@@ -215,5 +215,35 @@ test('exports: long format, codebook, REDCap dictionary and archive', () => {
   assert.ok(!RS.exportParticipants(db).split('\n')[0].split(',').includes('name'));
 });
 
+test('clusters and data collectors are part of the design, with their changes summarised', () => {
+  assert.ok(St.unlock(St.DEMO_PASSWORD));
+  const d = St.draft();
+  assert.deepStrictEqual(d.collectors.map((c) => c.name), RS.STAFF.collectors.map((c) => c.name));
+  const cl = St.addCluster(d);
+  d.clusters.find((c) => c.id === cl).name = 'Grand Bassin';
+  const co = St.addCollector(d);
+  Object.assign(d.collectors.find((c) => c.id === co), { name: 'Priya Doorgah', clusters: [cl] });
+  const texts = St.changes(null).map((c) => c.text);
+  assert.ok(texts.some((t) => /^New cluster: Grand Bassin/.test(t)), texts.join(' | '));
+  assert.ok(texts.includes('New data collector: Priya Doorgah, working in Grand Bassin'), texts.join(' | '));
+  St.removeCluster(d, cl);
+  assert.deepStrictEqual(d.collectors.find((c) => c.id === co).clusters, [], 'removing a cluster takes it off collectors');
+  St.discard();
+});
+
+test('blinded studies show a code, never the arm name, to supervisors and in exports', () => {
+  const d = St.clone(St.latest().design);
+  d.assignment.visible = 'none';
+  const keepP = RS.protocols[d.id];
+  try {
+    RS.registerProtocol(St.toRuntime(d, 'test'));
+    assert.strictEqual(RS.armName('arm2'), 'Arm B');
+    const db = RS.seed();
+    const csv = RS.exportParticipants(db);
+    assert.ok(!/Standard care|Intervention/.test(csv), 'no arm names in the export');
+    assert.ok(/Arm A/.test(csv) && /Arm B/.test(csv));
+  } finally { RS.protocols[d.id] = keepP; }
+});
+
 console.log(`\n${n - failed}/${n} passed`);
 process.exit(failed ? 1 : 0);
