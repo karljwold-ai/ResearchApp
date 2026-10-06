@@ -29,6 +29,31 @@ To add a protocol, add its file to `index.html` before `js/demo.js`.
 | `needInfo` | Open items, listed on the Protocol screen |
 | `listeningApproved` | `false` keeps listening off, except with Test tools |
 
+## Arms, assignment and versions (study design)
+
+The supervisor's **Study design** screen edits this same format and saves published versions on the
+device. A protocol file is the starting point (version 1.0); arms are made from the clusters' arm names.
+
+```js
+arms: [{ id: 'arm1', name: 'Intervention' }, { id: 'arm2', name: 'Standard care' }],   // shown as "Arm 1: Intervention"
+assignment: {
+  method: 'cluster',          // single | cluster | collector | chosen | random
+  visible: 'all',             // all | supervisor | none (blinded: "Arm A")
+  collectorArms: { c1: 'arm1' },   // for method "collector"
+  blockSizes: [4, 6],              // for method "random" (permuted blocks)
+},
+clusters: [{ id: 'esperance', name: 'Esperance Trebuchet', armId: 'arm1' }],
+forms: { diet: { title: '…', arms: ['arm1'], fields: [ … ] } },   // no "arms": every arm asks it
+retired: [{ id: 'occupation', label: '…', type: 'choice', retiredFrom: 'demographics' }],
+```
+
+- The participant's arm is fixed at consent (`participant.arm`, with `participant.allocation`:
+  how, slot, reason, design version). Before that, or in older records, it comes from the cluster.
+- A section with `arms` is asked only in those arms. Conditions can't use the arm.
+- `retired` lists questions removed after they were published: they are no longer asked, and stay in
+  the exports and the codebook.
+- Each published version records who, when and why; visit records keep `designVersion`.
+
 ## Screening and eligibility
 
 ```js

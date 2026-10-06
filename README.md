@@ -1,12 +1,15 @@
-# ICEHALL Research
+# Jamii Research
 
-A lightweight, offline-first tablet app for running a research protocol in the community:
-screening, informed consent, protocol visits, a visit schedule with windows, participant
-messaging, and supervisor data review. It is the research counterpart of the ICEHALL clinical app
-and uses the same rule and listening engine.
+A lightweight, offline-first tablet app for running a research study in the community:
+screening, informed consent, study visits, a visit schedule with windows, participant
+messaging, supervisor data review, a **study design** the supervisor can edit and version, and
+**data export**. It is the research counterpart of the Jamii clinical app and uses the same rule
+and listening engine.
 
-The demo protocol is built from **ICEHALL Protocol v08 (21 June 2026, IRB draft)**, for the
-Mauritius site. v08 is not yet IRB-approved, so this is for demonstration and training only.
+The active study's short name shows at the top of every screen (“No active study” until a study
+design is published). The demo study is **ICEHALL**, built from **ICEHALL Protocol v08 (21 June
+2026, IRB draft)** for the Mauritius site. v08 is not yet IRB-approved, so this is for
+demonstration and training only.
 
 ## Run it
 
@@ -19,7 +22,7 @@ To use the microphone, serve it locally instead:
 node tools/serve.mjs        # then open http://localhost:8080
 ```
 
-Run the tests with `node tests/run.test.js`.
+Run the tests with `node tests/run.test.js` and `node tests/study.test.js`.
 
 ## Two views
 
@@ -37,6 +40,61 @@ standard care); pick which one with the menu next to **Data collector**.
 
 The supervisor doesn't run visits or message participants. On completed visits they can **Query**,
 **Correct** (with a reason, kept in the audit trail) and **Mark reviewed**.
+
+## Study design (supervisor)
+
+**Study design** sits in a separate *Study* card at the bottom of the supervisor's menu, with
+**Export data**. The design is the study's questions as data, so a study can be changed without
+programming.
+
+- **Name**: the study name and the short name shown at the top of every screen.
+- **Sections and questions**: a section is a group of questions (Demographics, Measurements,
+  PHQ-9…). Each question has its wording, a variable name for the export, a type (yes/no, choose
+  one, number, whole number, blood pressure, date, free text), and optionally a unit, allowed range,
+  query range, note, *ask only if* condition, and whether it is required. **Preview** shows a section
+  as data collectors will see it.
+- **Arms**: set the number of arms and name them (“Arm 1: Intervention”). Switch between arms to see
+  each arm's sections. **Sections are shared**: each arm and each visit ticks the sections it asks,
+  so editing a section changes it in every arm that uses it. An arm with no sections offers to copy
+  another arm: *the same sections* (shared) or *separate copies* (its own version, new variable names).
+- **Visit schedule**: visits, their day and window, and which sections each visit asks.
+- **Assignment**: one arm; by cluster or site (ICEHALL: cluster-randomised); by data collector;
+  chosen at enrolment (with a reason; flagged as a risk of bias); or randomised on the tablet from
+  an allocation list of shuffled blocks. The arm is fixed at consent, before the baseline visit, and
+  recorded with how it was decided and the design version.
+- **Who sees the arm**: everyone, supervisors only (“Arm hidden” for collectors), or no one (“Arm A”).
+- **Lock and versions**: the design is locked. The lock at the top unlocks it after a confirmation
+  and the supervisor password (**demo: 000000**). Changes are made in a **draft**; data collectors
+  keep the published version until the draft is published. **Review and publish** lists every change
+  (with how many visit records hold data for anything removed) and asks for a reason, for example the
+  amendment and its approval. Publishing locks the design again as the next version (1.0, 1.1…), and
+  each visit record keeps the version it was collected under. While a draft is open, other supervisor
+  screens show a reminder.
+- **Rules that protect collected data**: once published, a question's variable name and type are
+  fixed, and answer codes can be added but not changed. Removing a published question **retires**
+  it: it is no longer asked, and its data stays in every export and the codebook.
+- **Not yet in the builder** (shown read-only under *Other protocol parts*, still edited in the
+  protocol file): screening and eligibility, consent, calculated scores and safety rules.
+- **Demo**: *Versions* can start a new, empty study (data collectors see “No active study” until it
+  is published) and restore the ICEHALL demo.
+
+## Export data (supervisor)
+
+De-identified by default (study and household IDs only). Ticking *Include names, phone numbers and
+dates of birth* adds them to the participants export and the archive, after a confirmation. Every
+export is recorded in the audit trail.
+
+| Export | What it is |
+|---|---|
+| Visits (CSV) | One row per completed visit, every question as a column, missing-data reasons, calculated values, arm and design version |
+| Answers (CSV, long) | One row per answer: new questions never change the columns |
+| Participants and consent (CSV) | Status, arm and how it was assigned, consent version and options, withdrawals |
+| Codebook (CSV) | Every variable: wording, type, unit, answer codes, limits, arms, retired or not |
+| REDCap data dictionary (CSV) | The design as REDCap forms; *ask only if* conditions go in the annotation column for translation |
+| Full archive (JSON) | Everything, including the design versions, queries, referrals, safety events and the audit trail |
+| Audit trail (CSV) | Corrections, unlocks, publications and exports |
+
+Exports cover the data on this tablet: until sync is connected, each tablet exports its own.
 
 ## Referrals and the printable handoff
 
@@ -145,8 +203,12 @@ js/rules.js                 condition language and phrase compiler (shared with 
 js/listen.js                reads answers from a conversation (shared helpers)
 protocols/icehall-v08.js    the protocol, as data
 js/demo.js                  demo staff, participants and conversations
+js/study.js                 study design: published versions, draft, arms and assignment, change summary
+js/design.js                Study design and Export data screens
+js/export.js                long format, codebook, REDCap dictionary, archive, audit exports
 js/app.js                   screens and actions
 tests/run.test.js           engine tests (node)
+tests/study.test.js         study design and export tests (node)
 tools/serve.mjs             local server
 ```
 
@@ -156,4 +218,8 @@ tools/serve.mjs             local server
 - An SMS gateway.
 - Paper-form fallback and double entry for critical fields.
 - Re-consent when the protocol is amended.
+- In the study design: screening and eligibility, consent, calculated scores and safety rules;
+  more answer types (choose several, slider, time); XLSForm import and export; Excel and
+  Stata/SPSS/R label scripts; ending a study and wiping tablets (needs sync).
+- Real sign-in: the demo shows the supervisor password.
 - Intervention-arm records (CHO contacts, CUMED sessions). This app covers the research assessments only.

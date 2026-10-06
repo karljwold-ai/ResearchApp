@@ -27,7 +27,7 @@
     id: 'icehall-v08',
     version: 'v08 (21 Jun 2026, IRB draft)',
     title: 'ICEHALL: Interventions in Communities to Encourage Health for ALL Impact Study',
-    short: 'ICEHALL study',
+    short: 'ICEHALL',
     idPrefix: 'ICE-MU',
     target: 300, // ASSUMPTION: demo enrolment target for one site; v08 sizes clusters, not a site total
     studyPhone: '5 700 0000', // DEMO number: the real study line is NEED INFO

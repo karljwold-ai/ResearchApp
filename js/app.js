@@ -1,5 +1,5 @@
 /*
- * ICEHALL Research: screens and actions.
+ * Jamii Research: screens and actions.
  * Two views: Data collector and Supervisor. One protocol (RS.protocol()) drives every form,
  * rule, schedule and message; this file only draws it.
  */
@@ -37,6 +37,12 @@
     printer: '<path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/>',
     house: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
     transfer: '<path d="M4 8h14l-4-4"/><path d="M20 16H6l4 4"/>',
+    unlock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.6-1.8"/>',
+    eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    up: '<path d="m6 15 6-6 6 6"/>',
+    down: '<path d="m6 9 6 6 6-6"/>',
+    right: '<path d="m9 6 6 6-6 6"/>',
+    flask: '<path d="M9 3h6M10 3v6L4 19a1.5 1.5 0 0 0 1.3 2h13.4A1.5 1.5 0 0 0 20 19l-6-10V3"/><path d="M7 15h10"/>',
   };
   const icon = (n) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
@@ -53,8 +59,10 @@
     listen: { recId: null, text: '', recording: false, interim: '', mode: 'check' },
   };
   if (!RS.STAFF.collectors.some((c) => c.id === S.collectorId)) S.collectorId = RS.STAFF.collectors[0].id;
-  const homeScreen = () => (S.role === 'SUPERVISOR' ? 'quality' : 'schedule');
+  const homeScreen = () => (RS.noStudy ? (S.role === 'SUPERVISOR' ? 'design' : 'nostudy') : S.role === 'SUPERVISOR' ? 'quality' : 'schedule');
   S.screen = homeScreen();
+  // After publishing a design version the app restarts; return to the study design.
+  try { if (sessionStorage.getItem('jamii.research.return') === 'design' && S.role === 'SUPERVISOR') S.screen = 'design'; sessionStorage.removeItem('jamii.research.return'); } catch (e) { /* private mode */ }
   const saveUi = () => { try { localStorage.setItem(UI_KEY, JSON.stringify({ role: S.role, collectorId: S.collectorId, test: S.test })); } catch (e) { /* private mode */ } };
   const save = () => RS.save(db);
   const isSup = () => S.role === 'SUPERVISOR';
@@ -69,6 +77,10 @@
   const rec = (id) => db.visits.find((r) => r.id === id);
   const visitDef = (id) => P.visits.find((v) => v.id === id);
   const clusterOf = (p) => (P.clusters || []).find((c) => c.id === p.cluster) || { name: p.cluster || '—', arm: '' };
+  // The arm as this viewer may see it (the study's visibility setting), by participant or by arm id.
+  const armShownId = (id) => (P.arms ? RS.study.armShown(P, id, S.role) : '');
+  const armText = (p) => armShownId(RS.armOf(p));
+  const clusterArm = (c) => (P.assignment && P.assignment.method === 'cluster' ? armShownId(c.armId) : '');
   const initials = (name) => (name || '?').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
   const pLabel = (p) => p.studyId || p.screeningNo;
   const ageText = (p) => { const a = D.ageYears(p.dob); return a == null ? '' : `${a} y${p.dobEstimated ? ' (est.)' : ''}`; };
@@ -94,9 +106,9 @@
       if (n) { n.focus(); try { if (keep.s != null) n.setSelectionRange(keep.s, keep.e); } catch (e) { /* not text */ } }
     }
   }
-  function download(name, text) {
+  function download(name, text, type) {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+    a.href = URL.createObjectURL(new Blob([text], { type: type || 'text/csv' }));
     a.download = name;
     document.body.appendChild(a);
     a.click();
@@ -109,6 +121,7 @@
   const openQueries = () => db.queries.filter((q) => q.status === 'open' && isMine(part(q.participantId)));
   const myRows = () => RS.scheduleRows(db, P, null, 30).filter((r) => isMine(r.participant));
   function navItems() {
+    if (RS.noStudy) return [];
     const pending = db.messages.filter((m) => m.status === 'pending').length;
     const items = [];
     if (isSup()) {
@@ -134,17 +147,22 @@
   function renderNav() {
     const u = me();
     const active = { participant: 'records', visit: S.pid && part(S.pid) && part(S.pid).status === 'screening' ? 'initial' : 'records', visitview: 'records' }[S.screen] || S.screen;
+    // The study's own tools sit apart from the day-to-day screens (supervisors only).
+    const studyCard = isSup() ? `<div class="nav-card"><div class="nav-card-label">Study</div>
+        ${[['design', 'Study design', 'flask', RS.study.draft() ? '!' : '', 'urgent'], ...(RS.noStudy ? [] : [['export', 'Export data', 'download']])].map(([id, label, ic, badge, tone]) => `
+          <button class="nav-item ${active === id ? 'active' : ''}" data-action="go" data-screen="${id}" title="${esc(label)}">${icon(ic)}<span class="nav-label">${esc(label)}</span>${badge ? `<span class="badge ${tone || ''}" title="Unpublished changes">${badge}</span>` : ''}</button>`).join('')}</div>` : '';
     $('appnav').innerHTML = `
-      <div class="brand"><div class="brand-mark">IH</div><div class="brand-text"><strong>ICEHALL</strong><span>Research</span></div></div>
+      <div class="brand"><div class="brand-mark">JR</div><div class="brand-text"><strong>Jamii Research</strong><span>${esc(RS.noStudy ? 'No active study' : P.short || P.title)}</span></div></div>
       <div class="me"><div class="avatar">${esc(initials(u.name))}</div><div class="me-text"><strong>${esc(u.name)}</strong><span>${esc(u.role)}</span></div></div>
       <div class="nav-items">
         ${navItems().map(([id, label, ic, badge, tone]) => (id === 'sep' ? '<div class="nav-sep"></div>' : `
           <button class="nav-item ${active === id ? 'active' : ''}" data-action="go" data-screen="${id}" title="${esc(label)}">
             ${icon(ic)}<span class="nav-label">${esc(label)}</span>${badge ? `<span class="badge ${tone || ''}">${badge}</span>` : ''}
           </button>`)).join('')}
+        ${studyCard}
       </div>
       <div class="nav-foot">
-        <p>${esc(P.title.split(':')[0])} protocol ${esc(P.version)}. ${esc(P.status)}</p>
+        ${RS.noStudy ? '' : `<p>${esc(P.title.split(':')[0])} protocol ${esc(P.version)} · design version ${esc(P.designVersion || '—')}. ${esc(P.status)}</p>`}
         <p>Prototype: SMS, sync and sign-in are not connected.</p>
         <button class="btn sm ghost" data-action="reset-demo">${icon('reset')}<span class="nav-label">Reset demo data</span></button>
       </div>`;
@@ -157,11 +175,11 @@
     document.body.dataset.role = S.role;
   }
 
-  const TITLES = { initial: 'Initial visit', records: 'Participant records', participant: 'Participant', visit: 'Visit', visitview: 'Visit record', schedule: 'Schedule', messages: 'Messaging', quality: 'Data quality review', analysis: 'Analysis', protocol: 'Protocol' };
+  const TITLES = { design: 'Study design', export: 'Export data', nostudy: 'No active study', initial: 'Initial visit', records: 'Participant records', participant: 'Participant', visit: 'Visit', visitview: 'Visit record', schedule: 'Schedule', messages: 'Messaging', quality: 'Data quality review', analysis: 'Analysis', protocol: 'Protocol' };
   // Screens each view may open (the supervisor reviews; collectors run visits and message participants).
   const ALLOWED = {
-    SUPERVISOR: ['quality', 'analysis', 'records', 'participant', 'visitview', 'schedule', 'messages', 'protocol'],
-    COLLECTOR: ['initial', 'records', 'participant', 'visit', 'visitview', 'schedule', 'messages', 'protocol'],
+    SUPERVISOR: RS.noStudy ? ['design'] : ['quality', 'analysis', 'records', 'participant', 'visitview', 'schedule', 'messages', 'protocol', 'design', 'export'],
+    COLLECTOR: RS.noStudy ? ['nostudy'] : ['initial', 'records', 'participant', 'visit', 'visitview', 'schedule', 'messages', 'protocol'],
   };
   function go(screen, opts) {
     if (S.listen.recording && screen !== 'visit') stopMic();
@@ -174,8 +192,11 @@
   }
   function render() {
     renderNav();
-    $('topTitle').textContent = TITLES[S.screen] || 'ICEHALL Research';
-    patch($('view'), (SCREENS[S.screen] || SCREENS.schedule)());
+    $('topTitle').textContent = TITLES[S.screen] || 'Jamii Research';
+    // The study name on every screen: only once a version is published.
+    const chip = $('studyChip');
+    if (chip) { chip.textContent = RS.noStudy ? 'No active study' : P.short || P.title; chip.classList.toggle('none', RS.noStudy); }
+    patch($('view'), (isSup() && S.screen !== 'design' ? DZ.draftBanner() : '') + (SCREENS[S.screen] || SCREENS.schedule)());
     renderModal();
   }
 
@@ -274,7 +295,9 @@
     const C = P.consent;
     const c = p.consentDraft || (p.consentDraft = { read: false, checks: {}, options: Object.fromEntries(C.options.map((o) => [o.id, !!o.default && !o.requiresApproval])), method: '', witness: '', copyGiven: false, language: p.language });
     const checksOk = C.checks.every((q) => c.checks[q.id] === q.answer);
-    const ok = c.read && checksOk && c.method && (c.method !== 'thumbprint' || c.witness.trim()) && c.copyGiven;
+    // "Chosen at enrolment": the collector picks the arm (with a reason) before consent completes.
+    const choose = P.assignment && P.assignment.method === 'chosen' && P.arms.length > 1;
+    const ok = c.read && checksOk && c.method && (c.method !== 'thumbprint' || c.witness.trim()) && c.copyGiven && (!choose || (c.arm && (c.armReason || '').trim()));
     return `<div class="page narrow">${stepsHtml('consent')}
       <div class="card"><div class="card-head"><h3>Information sheet</h3><span class="tag">${esc(C.version)}</span></div>
         <p class="small muted">${esc(C.language)}. ${esc(C.method)}.</p>
@@ -291,6 +314,9 @@
           return `<label class="check ${locked ? 'disabled' : ''}"><input type="checkbox" data-action="consent-opt" data-k="${o.id}" ${c.options[o.id] ? 'checked' : ''} ${locked ? 'disabled' : ''}><span>${esc(o.text)}${o.requiresApproval && !P.listeningApproved ? `<br><span class="small muted">${S.test ? 'Test tools: enabled for the demo only.' : 'Not approved under this protocol version (needs the Layer 5 amendment).'}</span>` : ''}</span></label>`;
         }).join('')}
       </div>
+      ${choose ? `<div class="card"><div class="card-head"><h3>Study arm</h3></div>
+        <div class="chips" style="margin-bottom:10px">${P.arms.map((a) => `<button class="chip ${c.arm === a.id ? 'on' : ''}" data-action="consent-set" data-k="arm" data-v="${a.id}">${esc(RS.study.armLabel(P, a.id))}</button>`).join('')}</div>
+        <label><span class="lbl">Why this arm</span><input class="input wide" id="c-armReason" data-input="consent" data-k="armReason" value="${esc(c.armReason || '')}"></label></div>` : ''}
       <div class="card"><div class="card-head"><h3>Signature</h3></div>
         <div class="chips" style="margin-bottom:10px">${[['signature', 'Signed'], ['thumbprint', 'Thumbprint with witness'], ['oral', 'Witnessed oral consent']].map(([k, l]) => `<button class="chip ${c.method === k ? 'on' : ''}" data-action="consent-set" data-k="method" data-v="${k}">${l}</button>`).join('')}</div>
         ${c.method === 'thumbprint' || c.method === 'oral' ? `<label><span class="lbl">Impartial witness (name)</span><input class="input" id="c-witness" data-input="consent" data-k="witness" value="${esc(c.witness)}"></label>` : ''}
@@ -557,7 +583,7 @@
           const nx = p.status === 'enrolled' ? RS.nextVisit(db, P, p) : null;
           const missed = p.status === 'enrolled' && P.visits.some((v) => RS.visitStatus(db, p, v) === 'missed');
           const nq = db.queries.filter((x) => x.participantId === p.id && x.status !== 'closed').length;
-          return `<tr class="click" data-action="open-participant" data-pid="${p.id}"><td class="mono">${esc(pLabel(p))}</td><td><b>${esc(p.name)}</b><div class="small muted">${esc(ageText(p))} · ${p.sex === 'F' ? 'F' : 'M'}</div></td><td>${esc(clusterOf(p).name)}<div class="small muted">${esc(clusterOf(p).arm)}</div></td><td>${statusTag(p)}</td>
+          return `<tr class="click" data-action="open-participant" data-pid="${p.id}"><td class="mono">${esc(pLabel(p))}</td><td><b>${esc(p.name)}</b><div class="small muted">${esc(ageText(p))} · ${p.sex === 'F' ? 'F' : 'M'}</div></td><td>${esc(clusterOf(p).name)}<div class="small muted">${esc(armText(p))}</div></td><td>${statusTag(p)}</td>
             <td>${nx ? `${esc(nx.visit.label)}<div class="small ${nx.status === 'due' ? '' : 'muted'}">${esc(RS.windowText(nx.status, nx.window))}</div>` : ''}${missed ? '<span class="tag missed">Missed visit</span>' : ''}</td>
             <td>${nq ? `<span class="tag warn">${nq} quer${nq === 1 ? 'y' : 'ies'}</span>` : ''}</td></tr>`;
         }).join('') || '<tr><td colspan="6" class="empty">No one matches.</td></tr>'}
@@ -596,7 +622,7 @@
     return `<div class="page">
       <div class="card"><div class="p-head"><div class="avatar">${esc(initials(p.name))}</div><div style="flex:1;min-width:240px">
         <h2>${esc(p.name)} ${statusTag(p)}</h2>
-        <div class="facts"><span class="mono">${esc(pLabel(p))}</span><span>${esc(ageText(p))} · ${p.sex === 'F' ? 'Female' : 'Male'}</span><span>${esc(c.name)} · ${esc(c.arm)}</span>${p.phone ? `<span>${icon('phone')} ${esc(p.phone)}</span>` : '<span>No phone</span>'}<span>${esc(p.language || '')}</span></div>
+        <div class="facts"><span class="mono">${esc(pLabel(p))}</span><span>${esc(ageText(p))} · ${p.sex === 'F' ? 'Female' : 'Male'}</span><span>${esc([c.name, armText(p)].filter(Boolean).join(' · '))}</span>${p.phone ? `<span>${icon('phone')} ${esc(p.phone)}</span>` : '<span>No phone</span>'}<span>${esc(p.language || '')}</span></div>
         ${p.enrolledAt ? `<div class="facts"><span>Enrolled <b>${esc(D.fmtLong(p.enrolledAt))}</b> by ${esc(p.enrolledBy)}</span><span>Consent: ${esc(p.consent.version)} (${esc(p.consent.method)}${p.consent.witness ? ', witness ' + esc(p.consent.witness) : ''})</span></div>` : ''}
         ${p.withdrawal ? `<div class="facts"><span>Withdrew <b>${esc(D.fmtLong(p.withdrawal.date))}</b>: ${esc(p.withdrawal.reason)} · ${esc(p.withdrawal.dataUse)}</span></div>` : ''}
         ${p.screenFail ? `<div class="facts"><span>Not enrolled: ${esc(p.screenFail.join('; '))}</span></div>` : ''}
@@ -660,7 +686,7 @@
         <div class="btn-row">${actions}</div></div>`;
     };
     const groups = S.groupBy === 'cluster'
-      ? P.clusters.filter((c) => rows.some((x) => x.participant.cluster === c.id)).map((c) => ({ title: c.name, sub: `${c.arm} · ${collectorName(c.id)}`, items: rows.filter((x) => x.participant.cluster === c.id) }))
+      ? P.clusters.filter((c) => rows.some((x) => x.participant.cluster === c.id)).map((c) => ({ title: c.name, sub: [clusterArm(c), collectorName(c.id)].filter(Boolean).join(' · '), items: rows.filter((x) => x.participant.cluster === c.id) }))
       : [['missed', 'Window closed', 'Not done in time: doing it now is recorded as a protocol deviation'], ['due', 'Due now', 'Window open today'], ['upcoming', 'Coming up', 'Window opens in the next 30 days']].map(([k, t, sub]) => ({ title: t, sub, tag: k, items: rows.filter((x) => x.status === k) }));
     return `<div class="page">
       ${isSup() ? filterBar() : ''}
@@ -788,7 +814,7 @@
       const cols = RS.STAFF.collectors.filter((c) => S.f.collector === 'all' || c.id === S.f.collector);
       body = `<p class="small muted">Follow-ups count visits whose window has closed. "Visits flagged" are visits where a safety rule asked for a referral or review. Amber: below the usual target (follow-up 85%, in window 80%, data complete 95%, referral seen 70%). These targets are suggestions, not from the protocol.</p>
         <div class="card tbl-wrap"><h3>By data collector</h3><table class="tbl perf">${head}<tbody>${cols.map((c) => row(c.name, c.clusters.map((id) => P.clusters.find((x) => x.id === id).name).join(', '), ps.filter((p) => c.clusters.includes(p.cluster)))).join('')}</tbody></table></div>
-        <div class="card tbl-wrap"><h3>By cluster</h3><table class="tbl perf">${head}<tbody>${P.clusters.filter((c) => ps.some((p) => p.cluster === c.id)).map((c) => row(c.name, `${c.arm} · ${collectorName(c.id)}`, ps.filter((p) => p.cluster === c.id))).join('')}</tbody></table></div>
+        <div class="card tbl-wrap"><h3>By cluster</h3><table class="tbl perf">${head}<tbody>${P.clusters.filter((c) => ps.some((p) => p.cluster === c.id)).map((c) => row(c.name, [clusterArm(c), collectorName(c.id)].filter(Boolean).join(' · '), ps.filter((p) => p.cluster === c.id))).join('')}</tbody></table></div>
         ${missedList(ps)}`;
     } else if (S.reviewTab === 'queries') {
       body = qOpen.map((q) => { const p = part(q.participantId), r = rec(q.visitRecId); return `<div class="card"><div class="card-head"><h3><button class="btn link" data-action="open-rec" data-rec="${r.id}">${esc(pLabel(p))} · ${esc(visitDef(r.visit).label)} · ${esc((P.fields[q.field] || {}).label || q.field)}</button></h3><span>Value: <b>${esc(fmtValue(P.fields[q.field], r.values[q.field]))}</b> · ${esc(r.collector)}</span></div>${queryHtml(q)}</div>`; }).join('') || '<p class="empty">No open queries.</p>';
@@ -802,7 +828,7 @@
         <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th>Participant</th><th>To</th><th>Why</th><th>Status</th><th>Collector</th><th></th></tr></thead><tbody>
         ${refs.slice().sort((a, b) => (a.status === 'open' ? -1 : 1) - (b.status === 'open' ? -1 : 1) || b.createdAt.localeCompare(a.createdAt)).map((x) => { const p = part(x.participantId); const [st, tone] = REF_STATUS[x.status]; const days = D.between(x.createdAt.slice(0, 10), D.today()); return `<tr><td>${esc(D.fmt(x.createdAt.slice(0, 10)))}</td><td><button class="btn link" data-action="open-participant" data-pid="${p.id}">${esc(pLabel(p))}</button> ${esc(p.name)}</td><td>${esc(RS.referralSite(P, x.to).name)}<div class="small"><span class="tag ${x.urgency === 'urgent' ? 'urgent' : 'soon'}">${x.urgency === 'urgent' ? 'Urgent' : 'Within a week'}</span></div></td><td class="small">${x.reasons.map((y) => esc(y.text.split(':')[0])).join('; ')}</td><td><span class="tag ${tone}">${st}</span>${x.status === 'open' && days > 7 ? `<div class="small muted">${days} days</div>` : ''}${x.outcome && x.outcome.text ? `<div class="small muted">${esc(x.outcome.text)}</div>` : ''}</td><td class="small">${esc(x.by)}</td><td><button class="btn sm ghost" data-action="view-handoff" data-ref="${x.id}">${icon('printer')}</button></td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">No referrals.</td></tr>'}</tbody></table></div>`;
     } else if (S.reviewTab === 'export') {
-      body = `<div class="card"><h3>Export for the data centre</h3><p class="small muted">Study IDs and household IDs only: no names, phone numbers or addresses. One row per completed visit; every protocol field, its missing-data reason, and the calculated values. Open queries are counted per row. Exports cover all clusters, whatever the filter.</p>
+      body = `<div class="card"><h3>Export for the data centre</h3><p>All exports, with the codebook, REDCap dictionary and full archive, are on <button class="btn link" data-action="go" data-screen="export">Export data</button>.</p><p class="small muted">Study IDs and household IDs only: no names, phone numbers or addresses. One row per completed visit; every protocol field, its missing-data reason, and the calculated values. Open queries are counted per row. Exports cover all clusters, whatever the filter.</p>
         <div class="btn-row"><button class="btn" data-action="export" data-k="visits">${icon('download')} Visits (CSV)</button><button class="btn" data-action="export" data-k="participants">${icon('download')} Participants and consent (CSV)</button><button class="btn" data-action="export" data-k="audit">${icon('download')} Audit trail (CSV)</button></div></div>`;
     } else {
       body = `<div class="card tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>Who</th><th>Change</th><th>Reason</th></tr></thead><tbody>${db.audit.filter((a) => !a.participantId || ids.has(a.participantId)).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 60).map(auditRow).join('') || '<tr><td colspan="4" class="empty">No changes yet.</td></tr>'}</tbody></table></div>`;
@@ -838,10 +864,10 @@
   // Categorical series colours, fixed order (validated palette: blue, orange, aqua, yellow). Colour follows the
   // entity (cluster order in the protocol; arms in order of first appearance), never its rank.
   const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100'];
-  const ARMS = () => [...new Set(P.clusters.map((c) => c.arm))];
+  const ARMS = () => (P.arms || []).map((a) => a.id);
   function analysisGroups(cohort) {
     const enrolled = db.participants.filter((p) => p.enrolledAt && inScope(p) && RS.inCohort(P, p, cohort));
-    if (S.an.split === 'arm') return ARMS().map((a, i) => ({ key: a, label: a, color: SERIES[i], parts: enrolled.filter((p) => clusterOf(p).arm === a) })).filter((g) => P.clusters.some((c) => c.arm === g.key && (S.f.cluster === 'all' || c.id === S.f.cluster)));
+    if (S.an.split === 'arm') return ARMS().map((a, i) => ({ key: a, label: armShownId(a), color: SERIES[i], parts: enrolled.filter((p) => RS.armOf(p) === a) })).filter((g) => g.parts.length);
     return P.clusters.map((c, i) => ({ key: c.id, label: c.name, color: SERIES[i], parts: enrolled.filter((p) => p.cluster === c.id) })).filter((g) => (S.f.cluster === 'all' || g.key === S.f.cluster) && (S.f.collector === 'all' || (RS.STAFF.collectors.find((x) => x.id === S.f.collector) || { clusters: [] }).clusters.includes(g.key)));
   }
   const fmtNum = (x, dec) => (x == null ? '—' : (Math.round(x * 10 ** (dec || 0)) / 10 ** (dec || 0)).toLocaleString(undefined, { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 }));
@@ -1019,7 +1045,15 @@
     </div>`;
   }
 
-  const SCREENS = { initial: screenInitial, records: screenRecords, participant: screenParticipant, visit: screenVisit, visitview: screenVisitView, schedule: screenSchedule, messages: screenMessages, quality: screenQuality, analysis: screenAnalysis, protocol: screenProtocol };
+  function screenNoStudy() {
+    return `<div class="page narrow"><div class="card empty-state">${icon('flask')}<h2>No active study</h2><p>There is no study on this tablet yet. Your supervisor sets up the study; when they publish it, your participants and visits appear here.</p></div></div>`;
+  }
+  const DZ = RS.designUI({
+    S, esc, icon, render, openModal, closeModal, renderModal, toast, download, fieldHtml, save,
+    me: () => me(), getDb: () => db, setDb: (x) => { db = x; save(); },
+    resetAll: () => { RS.study.resetDemo(); try { localStorage.removeItem(RS.STORE_KEY); } catch (e) { /* private mode */ } location.reload(); },
+  });
+  const SCREENS = { design: DZ.screens.design, export: DZ.screens.export, nostudy: screenNoStudy, initial: screenInitial, records: screenRecords, participant: screenParticipant, visit: screenVisit, visitview: screenVisitView, schedule: screenSchedule, messages: screenMessages, quality: screenQuality, analysis: screenAnalysis, protocol: screenProtocol };
 
   /* ------------------------------------------------------------------ */
   /* Modals                                                              */
@@ -1115,9 +1149,11 @@
           ${housemates(p.cluster, p.id).filter((x) => !x.household || x.household !== p.household).map((x) => `<option value="${x.id}" ${m.with === x.id ? 'selected' : ''}>Same household as ${esc(houseLabel(x))}</option>`).join('')}
           <option value="new" ${m.with === 'new' ? 'selected' : ''}>A new household on their own</option></select></label>
         <div class="btn-row end"><button class="btn" data-action="close-modal">Cancel</button><button class="btn primary" data-action="confirm-household" ${m.with ? '' : 'disabled'}>Save</button></div></div>`;
+    } else if (/^dz-/.test(m.type)) {
+      html = DZ.modal(m, head) || '';
     } else if (m.type === 'enrolled') {
       const p = part(m.pid);
-      html = `<div class="modal-card">${head('Enrolled')}<p><b>${esc(p.name)}</b> is now <b class="mono">${esc(p.studyId)}</b> (${esc(clusterOf(p).name)}, ${esc(clusterOf(p).arm)}).</p>
+      html = `<div class="modal-card">${head('Enrolled')}<p><b>${esc(p.name)}</b> is now <b class="mono">${esc(p.studyId)}</b> (${esc([clusterOf(p).name, armText(p)].filter(Boolean).join(', '))}).</p>
         <table class="tbl"><tbody>${P.visits.slice(1).map((v) => `<tr><td>${esc(v.label)}</td><td>${esc(RS.rangeText(RS.visitWindow(p, v)))}</td></tr>`).join('')}</tbody></table>
         <p class="small muted">Write the study ID and the next visit window on the participant's study card.</p>
         <div class="btn-row end"><button class="btn primary" data-action="close-modal">Done</button></div></div>`;
@@ -1131,7 +1167,7 @@
   function startVisit(p, v, deviation) {
     const existing = RS.draftRec(db, p.id, v.id);
     if (existing) { go('visit', { recId: existing.id, pid: p.id }); return; }
-    const r = { id: RS.uid('v'), participantId: p.id, visit: v.id, date: D.today(), collector: me().name, status: 'draft', values: {}, missing: {}, checks: {}, heard: {}, safety: [], protocolVersion: P.version, deviation: deviation || null, startedAt: new Date().toISOString() };
+    const r = { id: RS.uid('v'), participantId: p.id, visit: v.id, date: D.today(), collector: me().name, status: 'draft', values: {}, missing: {}, checks: {}, heard: {}, safety: [], protocolVersion: P.version, designVersion: P.designVersion || '', deviation: deviation || null, startedAt: new Date().toISOString() };
     db.visits.push(r);
     save();
     S.listen = { recId: r.id, text: '', recording: false, interim: '', mode: S.listen.mode };
@@ -1230,11 +1266,12 @@
     return p;
   }
 
+  const DZ_RESET = () => { RS.study.resetDemo(); try { localStorage.removeItem(RS.STORE_KEY); } catch (e) { /* private mode */ } location.reload(); };
   const handlers = {
     go: (el) => { if (el.dataset.screen === 'initial') { S.pid = null; S.idDraft = null; } go(el.dataset.screen); },
     'set-role': (el) => { S.role = el.dataset.role; saveUi(); S.idDraft = null; S.compose = null; S.msgTab = isSup() ? 'pending' : 'suggested'; go(homeScreen()); },
     'toggle-test': () => { S.test = !S.test; saveUi(); render(); },
-    'reset-demo': () => { if (!confirm('Reset all demo data on this device?')) return; stopMic(); db = RS.seed(); save(); S.listen = { recId: null, text: '', recording: false, interim: '', mode: 'check' }; go(homeScreen()); toast('Demo data reset'); },
+    'reset-demo': () => { if (!confirm('Reset all demo data on this device? This also restores the ICEHALL demo study design.')) return; stopMic(); DZ_RESET(); },
     'close-modal': () => closeModal(),
     goto: (el) => { const n = $(el.dataset.target); if (n) n.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
     'goto-field': (el) => { closeModal(); S.tried = true; render(); const n = $('fld-' + el.dataset.field); if (n) n.scrollIntoView({ behavior: 'smooth', block: 'center' }); },
@@ -1285,6 +1322,13 @@
       const p = part(S.pid);
       const c = p.consentDraft;
       p.consent = { version: P.consent.version, date: D.today(), method: c.method, witness: c.witness.trim(), copyGiven: c.copyGiven, checksPassed: true, language: c.language, options: Object.assign({}, c.options), by: me().name };
+      // The arm is fixed now, before the baseline visit (its sections depend on the arm), and recorded with how it was decided.
+      if (P.arms) {
+        const a = RS.study.assignArm(db, P, p, { collectorId: S.collectorId, chosen: c.arm, reason: c.armReason });
+        p.arm = a.arm;
+        p.allocation = { how: a.how, slot: a.slot || null, reason: a.reason || '', at: new Date().toISOString(), by: me().name, designVersion: P.designVersion || '' };
+        RS.audit(db, { by: me().name, participantId: p.id, what: `Assigned to ${RS.study.armLabel(P, a.arm)} (${RS.study.METHODS[a.how] ? RS.study.METHODS[a.how].label : a.how}${a.slot ? ', allocation ' + a.slot : ''})`, reason: a.reason || '' });
+      }
       delete p.consentDraft;
       p.wiz = 'baseline';
       RS.audit(db, { by: me().name, participantId: p.id, what: `Consent given (${P.consent.version})` });
@@ -1294,6 +1338,7 @@
 
     // visit form
     'set-val': (el) => {
+      if (el.dataset.mode === 'preview') { S.dz.pv[el.dataset.field] = String(S.dz.pv[el.dataset.field]) === el.dataset.v ? '' : el.dataset.v; renderModal(); return; }
       const r = rec(S.recId);
       const values = el.dataset.mode === 'screen' ? part(S.pid).screening.answers : r.values;
       values[el.dataset.field] = String(values[el.dataset.field]) === el.dataset.v ? '' : el.dataset.v;
@@ -1458,16 +1503,19 @@
     if (!h) return;
     if (el.tagName !== 'INPUT') e.preventDefault();
     const a = el.dataset.action;
-    if (isSup() ? COLLECTOR_ONLY.has(a) : SUPERVISOR_ONLY.has(a)) { toast(isSup() ? 'The supervisor view is for review: data collectors run visits and message participants.' : 'Only the supervisor can do this.'); return; }
+    if (isSup() ? COLLECTOR_ONLY.has(a) : SUPERVISOR_ONLY.has(a) || /^(dz-|xp$)/.test(a)) { toast(isSup() ? 'The supervisor view is for review: data collectors run visits and message participants.' : 'Only the supervisor can do this.'); return; }
     h(el, e);
   });
   // Belt and braces: the buttons are hidden in the other view too.
   const COLLECTOR_ONLY = new Set(['start-screening', 'start-visit', 'confirm-late', 'complete-visit', 'confirm-complete', 'withdraw', 'confirm-withdraw', 'consent-change', 'confirm-consent-change', 'remind', 'compose-to', 'compose-send', 'sug-send', 'sug-edit', 'answer-query', 'referral-outcome', 'confirm-outcome', 'household', 'confirm-household', 'resume-screening']);
   const SUPERVISOR_ONLY = new Set(['raise-query', 'confirm-query', 'close-query', 'reopen-query', 'correct', 'confirm-correct', 'mark-reviewed', 'assess-event', 'confirm-assess', 'msg-approve', 'msg-reject', 'export']);
+  Object.assign(handlers, DZ.handlers);
   document.addEventListener('input', (e) => {
     const el = e.target;
     const k = el.dataset.input;
     if (!k) return;
+    if (DZ.onInput(el)) return;
+    if (k === 'val' && el.dataset.mode === 'preview') { S.dz.pv[el.dataset.field] = el.value; return; }
     if (k === 'id') { S.idDraft[el.dataset.k] = el.value; render(); }
     else if (k === 'consent') { part(S.pid).consentDraft[el.dataset.k] = el.value; save(); render(); }
     else if (k === 'q') { S.q = el.value; render(); }
@@ -1486,6 +1534,7 @@
     const el = e.target;
     const k = el.dataset.change;
     if (!k) return;
+    if (DZ.onChange(el)) return;
     if (k === 'id') { S.idDraft[el.dataset.k] = el.value; if (el.dataset.k === 'cluster') S.idDraft.houseWith = ''; render(); }
     else if (k === 'modal') { S.modal[el.dataset.k] = el.value; renderModal(); }
     else if (k === 'collector') { S.collectorId = el.value; S.role = 'COLLECTOR'; saveUi(); S.idDraft = null; S.compose = null; go(['participant', 'visitview', 'records', 'messages', 'protocol'].includes(S.screen) ? S.screen : 'schedule'); }

@@ -1,4 +1,4 @@
-/* ICEHALL Research: tablet-first styles (same look as the ICEHALL clinical app) */
+/* Jamii Research: tablet-first styles (same look as the Jamii clinical app) */
 :root {
   --bg: #f3f5f8;
   --surface: #ffffff;
@@ -352,3 +352,79 @@ body[data-role="COLLECTOR"] .seg-select { color: var(--level); }
 .tbl.compact td:first-child { white-space: nowrap; }
 @media (max-width: 1150px) { .an-grid { grid-template-columns: minmax(0, 1fr); } }
 .an-grid .card { overflow-x: auto; }
+
+/* ---------- Study name in the top bar ---------- */
+.topbar-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.study-chip { font-size: 12px; font-weight: 800; letter-spacing: .03em; padding: 3px 10px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
+.study-chip.none { background: #eef1f5; color: var(--muted); }
+
+/* ---------- Study tools card in the nav (supervisor) ---------- */
+.nav-card { margin-top: 14px; padding: 8px 6px 6px; border: 1px solid rgba(255,255,255,.18); border-radius: 12px; background: rgba(255,255,255,.05); display: grid; gap: 2px; }
+.nav-card-label { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; opacity: .7; padding: 0 8px 4px; }
+
+/* ---------- Shared bits used by the study design ---------- */
+.icon-btn { width: 36px; height: 36px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); display: inline-grid; place-items: center; flex: none; padding: 0; }
+.grow { flex: 1; }
+.danger-text { color: var(--red); }
+.empty-state { text-align: center; padding: 32px 20px; }
+.empty-state .ic { width: 40px; height: 40px; color: var(--muted); }
+.empty-state h2 { margin: 10px 0 6px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.pair { display: flex; gap: 6px; }
+.link-strong { border: 0; background: none; padding: 0; font-weight: 800; font-size: 16px; text-align: left; color: var(--ink); }
+.check.inline { display: inline-flex; padding: 4px 14px 4px 0; }
+.amber-text { color: var(--amber); }
+
+/* ---------- Study design ---------- */
+.page.design { padding-bottom: 90px; }
+.dz-head-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+.lock-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); font-weight: 800; font-size: 13px; color: var(--ink); flex: none; }
+.lock-btn.open { background: var(--amber-soft); border-color: var(--amber-line); color: var(--amber); }
+.arm-switch { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.arm-switch .lbl { margin: 0 6px 0 0; }
+.dz-form { padding: 12px 14px; }
+.dz-form-head { display: flex; align-items: center; gap: 10px; }
+.dz-form-title { flex: 1; min-width: 0; }
+.dz-form-body { margin-top: 12px; display: grid; gap: 12px; }
+.dz-ticks { display: grid; gap: 8px; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 10px; padding: 10px 12px; }
+.dz-fields { display: grid; gap: 6px; }
+.dz-field { border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); }
+.dz-field.open { border-color: var(--brand); box-shadow: var(--shadow); }
+.dz-field-sum { width: 100%; display: grid; gap: 2px; text-align: left; border: 0; background: none; padding: 10px 12px; position: relative; }
+.dz-field-sum .tag { position: absolute; right: 10px; top: 10px; }
+.dz-q { font-weight: 700; padding-right: 50px; }
+.dz-q .req { color: var(--red); margin-left: 3px; }
+.dz-field-body { display: grid; gap: 10px; padding: 0 12px 12px; }
+.dz-opts { display: grid; gap: 6px; }
+.dz-opt { display: flex; gap: 6px; align-items: center; }
+.dz-opt .code { width: 90px; flex: none; font-family: ui-monospace, Menlo, monospace; }
+.copy-arm { border-color: var(--brand); background: var(--brand-soft); }
+.arm-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.arm-num { font-weight: 800; white-space: nowrap; }
+.method-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin: 8px 0 12px; }
+.method { display: grid; gap: 4px; text-align: left; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--surface); }
+.method span { font-size: 13px; color: var(--muted); }
+.method.on { border-color: var(--brand); background: var(--brand-soft); box-shadow: inset 0 0 0 1px var(--brand); }
+.dz-visits .input.num { width: 90px; }
+.dz-matrix td.c, .dz-matrix th { text-align: center; }
+.dz-matrix td:first-child, .dz-matrix th:first-child { text-align: left; }
+.dz-matrix input { width: 22px; height: 22px; accent-color: var(--brand); }
+.dz-bar { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; margin-top: 16px; background: var(--surface); border: 1px solid var(--amber-line); border-radius: 12px; box-shadow: 0 -2px 12px rgba(16, 24, 40, .08); }
+.dz-bar > span { flex: 1; min-width: 180px; }
+.dz-bar.locked { border-color: var(--line); }
+.dz-draft-banner { margin-bottom: 12px; align-items: center; }
+.dz-draft-banner > div { flex: 1; }
+.demo-note { background: var(--amber-soft); border-radius: 8px; padding: 6px 10px; }
+.ch-ok { color: var(--green); margin-top: 10px; }
+.ch-warn { color: var(--red); margin-top: 10px; }
+.section.preview { border: 1px dashed var(--line); border-radius: 10px; padding: 12px; margin: 10px 0; }
+.demo-only { border-style: dashed; }
+.xp-item { display: grid; grid-template-columns: minmax(220px, auto) 1fr; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line-2); }
+.xp-item:first-of-type { border-top: 0; }
+@media (max-width: 760px) {
+  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .xp-item { grid-template-columns: 1fr; }
+  .study-chip { max-width: 50vw; }
+}
+.method.off { opacity: .7; border-style: dashed; }
+.method b { display: flex; align-items: center; gap: 6px; }

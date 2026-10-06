@@ -43,7 +43,10 @@
    * Check a protocol and prepare it (parsed conditions, field index, listening patterns).
    * Throws one error listing every problem, so a broken protocol never half-loads.
    */
+  RS.raw = {};
   RS.registerProtocol = function (p) {
+    // Keep the protocol as plain data (before it is prepared) so the study design can be edited and saved.
+    if (!RS.raw[p.id]) RS.raw[p.id] = JSON.parse(JSON.stringify(p));
     const errs = [];
     const err = (where, msg) => errs.push(`${where}: ${msg}`);
     p.fields = {};
@@ -132,8 +135,17 @@
     visit: visitId || null,
     base: (part && part.screening && part.screening.answers) || {},
     consent: part && part.consent ? part.consent.options : null,
+    arm: part ? RS.armOf(part) : null,
     prev: prev || {},
   });
+  /** A participant's study arm (id): set at enrolment, or from their cluster. */
+  RS.armOf = (part) => {
+    if (!part) return null;
+    if (part.arm) return part.arm;
+    const proto = RS.protocol();
+    const c = proto && (proto.clusters || []).find((x) => x.id === part.cluster);
+    return (c && c.armId) || null;
+  };
   /** ctxFor with prev_ values taken from the participant's completed visits before `rec` (or all, without rec). */
   RS.ctxForVisit = (db, part, rec, on) => {
     const prior = db.visits.filter((r) => r.participantId === part.id && r.status === 'complete' && r.id !== (rec && rec.id) && (!rec || !rec.date || r.date <= rec.date));
@@ -173,7 +185,9 @@
   RS.visitSections = function (proto, visitDef, values, ctx) {
     ctx = Object.assign({}, ctx, { visit: visitDef.id });
     const env = envFor(proto, values, ctx);
-    return visitDef.forms.map((fid) => proto.forms[fid]).filter((form) => !form.showTree || RS.rules.truthy(form.showTree, env))
+    // A section is asked only in the arms that use it (no list: every arm).
+    const inArm = (form) => !form.arms || !form.arms.length || !ctx.arm || form.arms.includes(ctx.arm);
+    return visitDef.forms.map((fid) => proto.forms[fid]).filter((form) => form && inArm(form) && (!form.showTree || RS.rules.truthy(form.showTree, env)))
       .map((form) => ({ form, fields: form.fields.filter((f) => shown(f, env)) })).filter((x) => x.fields.length);
   };
   RS.screeningFields = (proto, answers, ctx) => { const env = envFor(proto, answers, ctx); return proto.screening.fields.filter((f) => shown(f, env)); };
@@ -549,25 +563,27 @@
 
   /** One row per completed visit; every protocol field and derived value as a column. Names are left out (study ID only). */
   RS.exportVisits = function (db, proto) {
-    const fields = Object.values(proto.fields).filter((f) => proto.formOf[f.id] !== 'screening');
-    const head = ['study_id', 'household_id', 'cluster', 'visit', 'visit_date', 'in_window', 'collector', 'protocol_version', 'consent_version', ...fields.flatMap((f) => [f.id, f.id + '_missing_reason']), ...proto.derived.map((d) => d.id), 'safety_flags', 'open_queries'];
+    // Retired fields (removed in a later version of the study design) keep their columns.
+    const fields = Object.values(proto.fields).filter((f) => proto.formOf[f.id] !== 'screening').concat(proto.retired || []);
+    const head = ['study_id', 'household_id', 'cluster', 'arm', 'visit', 'visit_date', 'in_window', 'collector', 'protocol_version', 'design_version', 'consent_version', ...fields.flatMap((f) => [f.id, f.id + '_missing_reason']), ...proto.derived.map((d) => d.id), 'safety_flags', 'open_queries'];
     const rows = [head];
     db.visits.filter((r) => r.status === 'complete').sort((a, b) => a.date.localeCompare(b.date)).forEach((r) => {
       const p = db.participants.find((x) => x.id === r.participantId);
       const vd = proto.visits.find((v) => v.id === r.visit);
-      const w = RS.visitWindow(p, vd);
+      const w = vd ? RS.visitWindow(p, vd) : null; // a visit removed from a later design version has no window
       const d = RS.derive(proto, r.values, RS.ctxForVisit(db, p, r));
-      rows.push([p.studyId, p.household || '', p.cluster, r.visit, r.date, r.date >= w.start && r.date <= w.end ? 'yes' : 'no', r.collector, r.protocolVersion, p.consent && p.consent.version,
+      rows.push([p.studyId, p.household || '', p.cluster, RS.armName ? RS.armName(RS.armOf(p)) : '', r.visit, r.date, w ? (r.date >= w.start && r.date <= w.end ? 'yes' : 'no') : '', r.collector, r.protocolVersion, r.designVersion || '', p.consent && p.consent.version,
         ...fields.flatMap((f) => [r.values[f.id], (r.missing || {})[f.id]]), ...proto.derived.map((x) => d[x.id]),
         (r.safety || []).map((s) => s.id).join(' '), db.queries.filter((q) => q.visitRecId === r.id && q.status !== 'closed').length]);
     });
     return RS.toCSV(rows);
   };
-  RS.exportParticipants = function (db) {
+  RS.exportParticipants = function (db, o) {
+    const ident = !!(o && o.identified);
     const opts = (RS.protocol().consent.options || []).map((o) => o.id);
     const clusterOf = (p) => (RS.protocol().clusters || []).find((c) => c.id === p.cluster) || {};
-    const rows = [['study_id', 'screening_no', 'household_id', 'status', 'sex', 'age_at_screening', 'cluster', 'arm', 'screened', 'enrolled', 'consent_version', ...opts.map((o) => 'consent_' + o), 'withdrawn', 'withdrawal_reason', 'data_use_after_withdrawal', 'screen_fail_reasons']];
-    db.participants.forEach((p) => rows.push([p.studyId || '', p.screeningNo, p.household || '', p.status, p.sex, ageYears(p.dob, p.screenedAt), clusterOf(p).name, clusterOf(p).arm, p.screenedAt, p.enrolledAt || '', p.consent ? p.consent.version : '',
+    const rows = [['study_id', 'screening_no', ...(ident ? ['name', 'phone', 'date_of_birth'] : []), 'household_id', 'status', 'sex', 'age_at_screening', 'cluster', 'arm', 'arm_assigned_by', 'screened', 'enrolled', 'consent_version', ...opts.map((o) => 'consent_' + o), 'withdrawn', 'withdrawal_reason', 'data_use_after_withdrawal', 'screen_fail_reasons']];
+    db.participants.forEach((p) => rows.push([p.studyId || '', p.screeningNo, ...(ident ? [p.name || '', p.phone || '', p.dob || ''] : []), p.household || '', p.status, p.sex, ageYears(p.dob, p.screenedAt), clusterOf(p).name, RS.armName ? RS.armName(RS.armOf(p)) : clusterOf(p).arm, p.allocation ? p.allocation.how : (p.enrolledAt ? 'cluster' : ''), p.screenedAt, p.enrolledAt || '', p.consent ? p.consent.version : '',
       ...opts.map((o) => (p.consent ? (p.consent.options[o] ? 'yes' : 'no') : '')), p.withdrawal ? p.withdrawal.date : '', p.withdrawal ? p.withdrawal.reason : '', p.withdrawal ? p.withdrawal.dataUse : '', (p.screenFail || []).join('; ')]));
     return RS.toCSV(rows);
   };
