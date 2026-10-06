@@ -63,21 +63,57 @@ test('sections are per arm: a section limited to one arm is skipped for the othe
   } finally { RS.protocols[d.id] = keepP; }
 });
 
-test('copying an arm: shared sections, or separate copies with new variable names', () => {
+test('schedules by arm: an arm can have its own visits and its own sections at a visit', () => {
   const d = St.clone(St.latest().design);
-  d.arms.push({ id: 'arm3', name: 'SMS' });
-  Object.values(d.forms).forEach((f) => { f.arms = ['arm1']; });
-  St.copyArm(d, 'arm1', 'arm3', false);
-  assert.ok(Object.values(d.forms).every((f) => f.arms.includes('arm3')), 'shared: same sections, one copy');
-  const before = Object.keys(d.forms).length;
-  const d2 = St.clone(St.latest().design);
-  d2.arms.push({ id: 'arm3', name: 'SMS' });
-  Object.values(d2.forms).forEach((f) => { f.arms = ['arm1']; });
-  St.copyArm(d2, 'arm1', 'arm3', true);
-  assert.strictEqual(Object.keys(d2.forms).length, before * 2, 'separate: a copy of each section');
-  const copy = Object.values(d2.forms).find((f) => f.arms.length === 1 && f.arms[0] === 'arm3' && f.title === d2.forms.phq9.title);
-  assert.ok(copy && copy.fields.every((f) => /arm3/.test(f.id)), 'copies get their own variable names');
-  assert.deepStrictEqual(St.check(d2), [], 'the copied design is valid');
+  St.setVisitForm(d, 'm3', 'phq9', 'arm2', true);          // arm 2 only
+  St.setVisitArm(d, 'm9', 'arm2', false);                  // month 9 only in arm 1
+  const at = (arm) => St.scheduleOfForm(d, 'phq9').find((x) => x.arm === arm).visits.map((v) => v.id).join(' ');
+  assert.strictEqual(at('arm1'), 'baseline m6 m12 m18 m24');
+  assert.strictEqual(at('arm2'), 'baseline m3 m6 m12 m18 m24');
+  assert.deepStrictEqual(St.visitArms(d, d.visits.find((v) => v.id === 'm9')), ['arm1']);
+  // Ticking for every arm makes the visit the same again (no per-arm lists left).
+  St.setVisitForm(d, 'm3', 'phq9', 'all', true);
+  assert.ok(!d.visits.find((v) => v.id === 'm3').armForms);
+  assert.deepStrictEqual(St.setVisitArm(d, 'baseline', 'arm2', false), false, 'the first visit is for every arm');
+  assert.deepStrictEqual(St.check(d), []);
+  // The runtime follows: a participant gets only their arm's visits and sections.
+  const keepP = RS.protocols[d.id];
+  try {
+    St.setVisitForm(d, 'm3', 'phq9', 'arm1', false);
+    RS.registerProtocol(St.toRuntime(d, 'test'));
+    const P = RS.protocol();
+    const arm1 = { cluster: 'esperance', enrolledAt: '2026-01-01' }, arm2 = { cluster: 'escalier', enrolledAt: '2026-01-01' };
+    assert.ok(RS.visitsFor(P, arm1).some((v) => v.id === 'm9'));
+    assert.ok(!RS.visitsFor(P, arm2).some((v) => v.id === 'm9'));
+    const m3 = P.visits.find((v) => v.id === 'm3');
+    assert.ok(RS.formsAt(m3, 'arm2').includes('phq9'));
+    assert.ok(!RS.formsAt(m3, 'arm1').includes('phq9'));
+  } finally { RS.protocols[d.id] = keepP; }
+});
+
+test('copying a schedule to a new arm, and duplicating a section for one arm', () => {
+  const d = St.clone(St.latest().design);
+  St.setVisitArm(d, 'm9', 'arm2', false);
+  const a3 = St.addArm(d);
+  St.copySchedule(d, 'arm2', a3);
+  assert.deepStrictEqual(d.visits.filter((v) => St.visitArms(d, v).includes(a3)).map((v) => v.id), d.visits.filter((v) => St.visitArms(d, v).includes('arm2')).map((v) => v.id));
+  const copy = St.duplicateForm(d, 'phq9');
+  assert.ok(d.forms[copy].fields.every((f) => !d.forms.phq9.fields.some((g) => g.id === f.id)), 'new variable names');
+  assert.ok(St.scheduleOfForm(d, copy).every((x) => !x.visits.length), 'not yet scheduled');
+  St.removeArm(d, a3);
+  assert.strictEqual(d.arms.length, 2);
+  assert.deepStrictEqual(St.check(d), []);
+});
+
+test('the change summary groups the same change across arms, and names the arm otherwise', () => {
+  assert.ok(St.unlock(St.DEMO_PASSWORD));
+  const d = St.draft();
+  St.setVisitForm(d, 'm3', 'phq9', 'all', true);
+  St.setVisitForm(d, 'm9', 'gad7', 'arm2', true);
+  const texts = St.changes(null).map((c) => c.text);
+  assert.ok(texts.includes('Month 3 now asks “Mood (PHQ-9)”') || texts.some((t) => /^Month 3 now asks/.test(t)), texts.join(' | '));
+  assert.ok(texts.some((t) => /^Arm 2: Standard care: Month 9 now asks/.test(t)), texts.join(' | '));
+  St.discard();
 });
 
 test('removing a published question retires it, and exports keep its column', () => {

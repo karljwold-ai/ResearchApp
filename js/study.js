@@ -219,28 +219,97 @@
     return { fields, forms: new Set(Object.keys(d.forms)), visits: new Set(d.visits.map((v) => v.id)), options };
   }
 
-  /** Copy one arm's sections for another: shared (tick the same sections) or as separate copies. */
-  function copyArm(d, fromArm, toArm, separate) {
-    const used = (fm) => !fm.arms || !fm.arms.length || fm.arms.includes(fromArm);
-    Object.entries(d.forms).filter(([, fm]) => used(fm)).forEach(([fid, fm]) => {
-      if (!separate) {
-        if (fm.arms && fm.arms.length && !fm.arms.includes(toArm)) fm.arms.push(toArm);
-        return;
+  /* ---- Schedule by arm ---- */
+  const visitArms = (d, v) => d.arms.filter((a) => !v.arms || !v.arms.length || v.arms.includes(a.id)).map((a) => a.id);
+  /** With more than one arm, keep each arm's sections at a visit separately. */
+  function ensureArmForms(d, v) {
+    if (d.arms.length < 2) return;
+    v.armForms = v.armForms || {};
+    d.arms.forEach((a) => { if (!v.armForms[a.id]) v.armForms[a.id] = (v.forms || []).slice(); });
+  }
+  /** Keep `forms` as every section asked at the visit (any arm); drop armForms when every arm asks the same. */
+  function tidyVisit(d, v) {
+    if (v.arms && (!v.arms.length || v.arms.length >= d.arms.length)) delete v.arms;
+    if (!v.armForms) return;
+    Object.keys(v.armForms).forEach((k) => { if (!d.arms.some((a) => a.id === k)) delete v.armForms[k]; });
+    const arms = visitArms(d, v);
+    const lists = arms.map((a) => (v.armForms[a] || []));
+    const order = Object.keys(d.forms);
+    v.forms = order.filter((f) => lists.some((l) => l.includes(f)));
+    if (lists.every((l) => l.length === lists[0].length && l.every((x) => lists[0].includes(x)))) { v.forms = lists[0] ? order.filter((f) => lists[0].includes(f)) : []; delete v.armForms; }
+  }
+  /** Tick or untick a section at a visit, for one arm or (arm 'all') every arm that has the visit. */
+  function setVisitForm(d, visitId, formId, arm, on) {
+    const v = d.visits.find((x) => x.id === visitId);
+    const set = (list) => { const i = list.indexOf(formId); if (on && i < 0) list.push(formId); if (!on && i >= 0) list.splice(i, 1); };
+    if (d.arms.length < 2) { set(v.forms); return; }
+    ensureArmForms(d, v);
+    (arm === 'all' ? visitArms(d, v) : [arm]).forEach((a) => set(v.armForms[a]));
+    tidyVisit(d, v);
+  }
+  /** Whether an arm has a visit; the first visit (enrolment) is for every arm. */
+  function setVisitArm(d, visitId, arm, on) {
+    const v = d.visits.find((x) => x.id === visitId);
+    if (d.visits[0] === v) return false;
+    let arms = visitArms(d, v);
+    arms = on ? [...new Set([...arms, arm])] : arms.filter((a) => a !== arm);
+    if (!arms.length) return false;
+    if (on && v.armForms && !v.armForms[arm]) v.armForms[arm] = [];
+    v.arms = arms;
+    tidyVisit(d, v);
+    return true;
+  }
+  /** Give one arm the same schedule as another: the same visits, asking the same sections. */
+  function copySchedule(d, fromArm, toArm) {
+    d.visits.forEach((v, i) => {
+      const inFrom = visitArms(d, v).includes(fromArm);
+      if (i > 0) {
+        const arms = visitArms(d, v).filter((a) => a !== toArm);
+        v.arms = inFrom ? [...arms, toArm] : arms;
+        if (!v.arms.length) v.arms = [fromArm];
       }
-      // A separate copy: new section and field ids, asked at the same visits, only in the target arm.
-      if (!fm.arms || !fm.arms.length) fm.arms = d.arms.map((a) => a.id);
-      fm.arms = fm.arms.filter((a) => a !== toArm);
-      const copy = clone(fm);
-      const cid = newFormId(d, fid + '_' + toArm);
-      const taken = usedIds(d);
-      const idMap = {};
-      copy.fields.forEach((f) => { const nid = newId(d, f.id + '_' + toArm, taken); taken.add(nid); idMap[f.id] = nid; f.id = nid; });
-      copy.arms = [toArm];
-      copy.title = fm.title;
-      delete copy.id;
-      d.forms[cid] = copy;
-      d.visits.forEach((v) => { if (v.forms.includes(fid)) v.forms.push(cid); });
+      if (inFrom) { ensureArmForms(d, v); if (v.armForms) v.armForms[toArm] = (v.armForms[fromArm] || v.forms).slice(); }
+      tidyVisit(d, v);
     });
+    // Visits now in no arm at all are dropped (only possible for visits that were just for the target arm).
+    d.visits = d.visits.filter((v, i) => i === 0 || visitArms(d, v).length);
+  }
+  /** Sections asked by an arm at each visit: [{ arm, visits: [visit] }] (arm null with one arm). */
+  function scheduleOfForm(d, formId) {
+    const arms = d.arms.length > 1 ? d.arms.map((a) => a.id) : [null];
+    return arms.map((arm) => ({ arm, visits: d.visits.filter((v) => (arm == null || visitArms(d, v).includes(arm)) && (RS.formsAt ? RS.formsAt(v, arm) : v.forms).includes(formId)) }));
+  }
+  /** A copy of a section with new variable names, not yet asked at any visit (for an arm-specific version). */
+  function duplicateForm(d, formId) {
+    const fm = d.forms[formId];
+    const copy = clone(fm);
+    delete copy.id;
+    delete copy.arms;
+    copy.title = `${fm.title} (copy)`;
+    const taken = usedIds(d);
+    copy.fields.forEach((f) => { const nid = newId(d, f.id + '_b', taken); taken.add(nid); f.id = nid; });
+    const id = newFormId(d, formId + '_b');
+    d.forms[id] = copy;
+    return id;
+  }
+  /** Remove an arm: its visits and sections go; clusters and collectors move to arm 1. */
+  function removeArm(d, arm) {
+    d.arms = d.arms.filter((a) => a.id !== arm);
+    d.visits.forEach((v) => { if (v.arms) v.arms = v.arms.filter((a) => a !== arm); if (v.armForms) delete v.armForms[arm]; });
+    d.visits = d.visits.filter((v, i) => i === 0 || !v.arms || v.arms.length);
+    d.visits.forEach((v) => tidyVisit(d, v));
+    Object.values(d.forms).forEach((f) => { if (f.arms) { f.arms = f.arms.filter((a) => a !== arm); if (!f.arms.length) delete f.arms; } });
+    (d.clusters || []).forEach((c) => { if (c.armId === arm) c.armId = d.arms[0].id; });
+    Object.keys(d.assignment.collectorArms || {}).forEach((k) => { if (d.assignment.collectorArms[k] === arm) d.assignment.collectorArms[k] = d.arms[0].id; });
+  }
+  /** A new arm has the shared visits, asking no sections where arms differ (copy a schedule to fill it). */
+  function addArm(d) {
+    let n = d.arms.length + 1;
+    while (d.arms.some((a) => a.id === 'arm' + n)) n++;
+    const id = 'arm' + n;
+    d.arms.push({ id, name: '' });
+    d.visits.forEach((v) => { if (v.armForms) v.armForms[id] = []; });
+    return id;
   }
 
   /** Remove a field: retired (kept for exports) if it was published, otherwise just deleted. */
@@ -254,7 +323,10 @@
   function removeForm(d, formId) {
     [...d.forms[formId].fields].forEach((f) => removeField(d, formId, f.id));
     delete d.forms[formId];
-    d.visits.forEach((v) => { v.forms = v.forms.filter((x) => x !== formId); });
+    d.visits.forEach((v) => {
+      v.forms = v.forms.filter((x) => x !== formId);
+      Object.keys(v.armForms || {}).forEach((k) => { v.armForms[k] = v.armForms[k].filter((x) => x !== formId); });
+    });
   }
 
   /* ------------------------------------------------------------------ */
@@ -280,7 +352,10 @@
     const newArms = b.arms.filter((x) => !(a.arms || []).some((y) => y.id === x.id)).map((x) => x.id);
     b.arms.forEach((arm, i) => {
       const old = (a.arms || []).find((x) => x.id === arm.id);
-      if (!old) add('add', `New arm: ${armLabel(b, arm.id)}, asking ${Object.values(b.forms).filter((f) => !f.arms || !f.arms.length || f.arms.includes(arm.id)).length} section(s)`);
+      if (!old) {
+        const asked = new Set(b.visits.filter((v) => visitArms(b, v).includes(arm.id)).flatMap((v) => (RS.formsAt ? RS.formsAt(v, arm.id) : v.forms)));
+        add('add', `New arm: ${armLabel(b, arm.id)}, asking ${asked.size} section(s)`);
+      }
       else if (old.name !== arm.name) add('change', `Arm ${i + 1} renamed: “${old.name}” → “${arm.name}”`);
     });
     (a.arms || []).forEach((arm) => { if (!b.arms.some((x) => x.id === arm.id)) add('remove', `Arm removed: ${armLabel(a, arm.id)}`); });
@@ -291,7 +366,7 @@
 
     Object.entries(b.forms).forEach(([fid, fm]) => {
       const o = a.forms[fid];
-      if (!o) { add('add', `New section “${fm.title}” (${fm.fields.length} question${fm.fields.length === 1 ? '' : 's'}), in ${armNames(b, fm.arms)}`); return; }
+      if (!o) { add('add', `New section “${fm.title}” (${fm.fields.length} question${fm.fields.length === 1 ? '' : 's'})`); return; }
       if (o.title !== fm.title) add('change', `Section renamed: “${o.title}” → “${fm.title}”`);
       const oa = (o.arms && o.arms.length ? o.arms : a.arms.map((x) => x.id)).slice().sort().join();
       const na = (fm.arms && fm.arms.length ? fm.arms : b.arms.map((x) => x.id)).slice().sort().join();
@@ -314,14 +389,33 @@
     });
     Object.entries(a.forms).forEach(([fid, o]) => { if (!b.forms[fid]) add('remove', `Section removed: “${o.title}”, from ${armNames(a, o.arms)}.${dataNote(recsWith(o.fields.map((f) => f.id)))}`); });
 
+    const title = (id) => (b.forms[id] || a.forms[id] || { title: id }).title;
+    const vArms = (d, v) => (d.arms && d.arms.length ? visitArms(d, v) : [null]);
+    const atArm = (v, arm) => (RS.formsAt ? RS.formsAt(v, arm) : v.forms);
+    const who = (arms, all) => (b.arms.length < 2 || arms.length === all.length ? '' : arms.map((x) => armLabel(b, x)).join(', ') + ': ');
     b.visits.forEach((v) => {
       const o = a.visits.find((x) => x.id === v.id);
-      if (!o) { add('add', `New visit: ${v.label} (day ${v.day})`); return; }
+      const armsNow = vArms(b, v);
+      if (!o) { add('add', `${who(armsNow, b.arms)}New visit: ${v.label} (day ${v.day})`); return; }
       if (o.label !== v.label) add('change', `Visit renamed: ${o.label} → ${v.label}`);
       if (o.day !== v.day || (o.before || 0) !== (v.before || 0) || (o.after || 0) !== (v.after || 0)) add('change', `${v.label}: day ${o.day} (−${o.before || 0}/+${o.after || 0}) → day ${v.day} (−${v.before || 0}/+${v.after || 0})`);
-      const title = (id) => (b.forms[id] || a.forms[id] || { title: id }).title;
-      v.forms.filter((x) => !o.forms.includes(x)).forEach((x) => add('add', `${v.label} now asks “${title(x)}”`));
-      o.forms.filter((x) => !v.forms.includes(x) && b.forms[x]).forEach((x) => add('remove', `${v.label} no longer asks “${title(x)}”`));
+      const armsWas = vArms(a, o);
+      if (b.arms.length > 1) {
+        armsNow.filter((x) => !armsWas.includes(x) && !newArms.includes(x)).forEach((x) => add('add', `${armLabel(b, x)} now has the ${v.label} visit`));
+        armsWas.filter((x) => !armsNow.includes(x) && b.arms.some((y) => y.id === x)).forEach((x) => add('remove', `${armLabel(b, x)} no longer has the ${v.label} visit`));
+      }
+      // Sections asked, arm by arm; the same change in every arm reads as one line.
+      const both = armsNow.filter((x) => armsWas.includes(x));
+      const diff = {};
+      both.forEach((arm) => {
+        const now = atArm(v, arm), was = atArm(o, arm);
+        now.filter((f) => !was.includes(f)).forEach((f) => { (diff['add|' + f] = diff['add|' + f] || []).push(arm); });
+        was.filter((f) => !now.includes(f) && b.forms[f]).forEach((f) => { (diff['remove|' + f] = diff['remove|' + f] || []).push(arm); });
+      });
+      Object.entries(diff).forEach(([k, arms]) => {
+        const [kind, f] = k.split('|');
+        add(kind, `${who(arms, both)}${v.label} ${kind === 'add' ? 'now asks' : 'no longer asks'} “${title(f)}”`);
+      });
     });
     a.visits.forEach((v) => { if (!b.visits.some((x) => x.id === v.id)) add('remove', `Visit removed: ${v.label}`); });
     return out;
@@ -378,7 +472,7 @@
     METHODS, VISIBILITY, TYPES, DEMO_PASSWORD,
     state: () => state, latest, current: () => state.draft || (latest() && latest().design), draft: () => state.draft,
     save: () => save(state), clone, fromProtocol, blankDesign, toRuntime, check, armLabel, armShown, assignArm, allocationList,
-    newId, newFormId, usedIds, publishedIds, copyArm, removeField, removeForm, changes, nextVersion, unlock, publish, discard, startBlank, resetDemo,
+    newId, newFormId, usedIds, publishedIds, removeField, visitArms, setVisitForm, setVisitArm, copySchedule, scheduleOfForm, duplicateForm, removeArm, addArm, tidyVisit, removeForm, changes, nextVersion, unlock, publish, discard, startBlank, resetDemo,
   };
   if (typeof module !== 'undefined') module.exports = RS.study;
 }());

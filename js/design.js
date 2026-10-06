@@ -9,7 +9,7 @@
   RS.designUI = function (ui) {
     const { S, esc, icon } = ui;
     const St = RS.study;
-    S.dz = S.dz || { tab: 'sections', arm: 'all', open: {}, field: null, pv: {} };
+    S.dz = S.dz || { tab: 'sections', sarm: 'all', open: {}, field: null, pv: {} };
     S.xpIdent = false;
 
     const d = () => St.current();
@@ -17,7 +17,6 @@
     const dis = () => (editing() ? '' : 'disabled');
     const changed = () => { St.save(); ui.render(); };
     const armLabel = (D, id) => St.armLabel(D, id);
-    const usesArm = (D, f, arm) => !f.arms || !f.arms.length || f.arms.includes(arm);
     const typeOf = (f) => (f.type === 'number' && f.integer ? 'integer' : f.type);
     const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
@@ -74,42 +73,35 @@
     }
 
     /* ---- Sections and questions ---- */
+    /** When a section is asked, arm by arm (set on the Visit schedule tab). */
+    function whenAsked(D, id) {
+      const sch = St.scheduleOfForm(D, id);
+      if (!sch.some((x) => x.visits.length)) return '<span class="amber-text">Visit schedule pending</span>';
+      return sch.map((x) => `<div>${x.arm ? `<b>${esc(armLabel(D, x.arm))}:</b> ` : ''}${x.visits.length ? esc(x.visits.map((v) => v.label).join(', ')) : '<span class="muted">not asked</span>'}</div>`).join('');
+    }
     function sectionsTab(D) {
-      const multi = D.arms.length > 1;
-      if (S.dz.arm !== 'all' && !D.arms.some((a) => a.id === S.dz.arm)) S.dz.arm = 'all';
-      const arm = S.dz.arm;
-      const list = Object.entries(D.forms).filter(([, f]) => arm === 'all' || usesArm(D, f, arm));
-      const others = D.arms.filter((a) => a.id !== arm && Object.values(D.forms).some((f) => usesArm(D, f, a.id)));
-      return `${multi ? `<div class="arm-switch"><span class="lbl">Showing</span>${[['all', 'All sections'], ...D.arms.map((a) => [a.id, armLabel(D, a.id)])].map(([k, l]) => `<button class="chip ${arm === k ? 'on' : ''}" data-action="dz-arm-view" data-v="${k}">${esc(l)}</button>`).join('')}</div>` : ''}
-        <p class="small muted">Sections are shared: each arm and each visit ticks the sections it asks, so editing a section changes it in every arm that uses it. ${multi ? 'Untick an arm on a section to leave it out of that arm.' : ''}</p>
-        ${arm !== 'all' && !list.length && editing() && others.length ? `<div class="card copy-arm"><h3>${esc(armLabel(D, arm))} has no sections yet</h3><p>Copy from another arm?</p>
-          <div class="btn-row"><select class="input" id="dzCopyFrom">${others.map((a) => `<option value="${a.id}">${esc(armLabel(D, a.id))}</option>`).join('')}</select>
-          <button class="btn primary" data-action="dz-copy-arm" data-sep="0">Use the same sections</button><button class="btn" data-action="dz-copy-arm" data-sep="1">Make separate copies</button></div>
-          <p class="small muted"><b>Same sections</b>: one copy, shared, so later edits reach both arms. <b>Separate copies</b>: this arm gets its own version to change independently (new variable names).</p></div>` : ''}
-        ${list.map(([id, f]) => formCard(D, id, f)).join('') || (!editing() || (arm !== 'all' && others.length) ? '' : '<p class="empty">No sections yet. Add one for each group of questions, for example Demographics, Measurements or PHQ-9.</p>')}
-        ${editing() ? `<button class="btn" data-action="dz-add-form">${icon('plus')} Add a section${arm !== 'all' && multi ? ` to ${esc(armLabel(D, arm))}` : ''}</button>` : ''}`;
+      const list = Object.entries(D.forms);
+      return `<p class="small muted">Each section is a group of questions. <b>When</b> it is asked, and in which arm, is set on the <button class="btn link" data-action="dz-tab" data-v="schedule">Visit schedule</button> tab. A section can be asked in several arms; editing it changes it everywhere. For a different version in one arm, duplicate it.</p>
+        ${list.map(([id, f]) => formCard(D, id, f)).join('') || '<p class="empty">No sections yet. Add one for each group of questions, for example Demographics, Measurements or PHQ-9.</p>'}
+        ${editing() ? `<button class="btn" data-action="dz-add-form">${icon('plus')} Add a section</button>` : ''}`;
     }
 
     function formCard(D, id, f) {
       const open = !!S.dz.open[id];
-      const allArms = !f.arms || !f.arms.length;
-      const visits = D.visits.filter((v) => v.forms.includes(id));
       const pub = St.publishedIds();
+      const scheduled = St.scheduleOfForm(D, id).some((x) => x.visits.length);
       return `<div class="card dz-form ${open ? 'open' : ''}">
         <div class="dz-form-head">
           <button class="icon-btn" data-action="dz-form-open" data-form="${id}" aria-label="${open ? 'Close' : 'Open'}">${icon(open ? 'down' : 'right')}</button>
           <div class="dz-form-title">${editing() && open ? `<input class="input wide" id="dz-ft-${id}" data-input="dz" data-k="form-title" data-form="${id}" value="${esc(f.title)}" placeholder="Section name">` : `<button class="link-strong" data-action="dz-form-open" data-form="${id}">${esc(f.title || 'Untitled section')}</button>`}
-            <div class="small muted">${plural(f.fields.length, 'question')} · ${D.arms.length > 1 ? (allArms ? 'All arms' : esc(f.arms.map((a) => armLabel(D, a)).join(', '))) + ' · ' : ''}${visits.length ? 'Asked at ' + esc(visits.map((v) => v.label).join(', ')) : '<span class="amber-text">Not asked at any visit yet</span>'}${f.show ? ` · only if <span class="mono">${esc(f.show)}</span>` : ''}${pub.forms.has(id) ? '' : editing() ? ' · <span class="tag">new</span>' : ''}</div></div>
+            <div class="small muted">${plural(f.fields.length, 'question')}${scheduled ? '' : ' · <span class="amber-text">visit schedule pending</span>'}${f.show ? ` · only if <span class="mono">${esc(f.show)}</span>` : ''}${pub.forms.has(id) || !editing() ? '' : ' · <span class="tag">new</span>'}</div></div>
           <button class="btn sm ghost" data-action="dz-preview" data-form="${id}">${icon('eye')} Preview</button>
         </div>
         ${open ? `<div class="dz-form-body">
+          <div class="dz-when"><span class="lbl">When it is asked</span>${whenAsked(D, id)}</div>
           ${f.intro ? `<p class="small muted">${esc(f.intro)}</p>` : ''}
-          ${editing() ? `<div class="dz-ticks">
-            ${D.arms.length > 1 ? `<div><span class="lbl">Arms that ask it</span>${D.arms.map((a) => `<label class="check inline"><input type="checkbox" data-action="dz-form-arm" data-form="${id}" data-arm="${a.id}" ${allArms || f.arms.includes(a.id) ? 'checked' : ''}><span>${esc(armLabel(D, a.id))}</span></label>`).join('')}</div>` : ''}
-            <div><span class="lbl">Visits that ask it</span>${D.visits.map((v) => `<label class="check inline"><input type="checkbox" data-action="dz-form-visit" data-form="${id}" data-visit="${v.id}" ${v.forms.includes(id) ? 'checked' : ''}><span>${esc(v.label)}</span></label>`).join('')}</div>
-          </div>` : ''}
           <div class="dz-fields">${f.fields.map((fl, i) => fieldRow(D, id, fl, i, f.fields.length)).join('') || '<p class="muted small">No questions yet.</p>'}</div>
-          ${editing() ? `<div class="btn-row"><button class="btn" data-action="dz-add-field" data-form="${id}">${icon('plus')} Add a question</button><span class="grow"></span><button class="btn ghost danger-text" data-action="dz-form-del" data-form="${id}">Remove section</button></div>` : ''}
+          ${editing() ? `<div class="btn-row"><button class="btn" data-action="dz-add-field" data-form="${id}">${icon('plus')} Add a question</button><button class="btn ghost" data-action="dz-form-dup" data-form="${id}">Duplicate section</button><span class="grow"></span><button class="btn ghost danger-text" data-action="dz-form-del" data-form="${id}">Remove section</button></div>` : ''}
         </div>` : ''}
       </div>`;
     }
@@ -187,20 +179,37 @@
       return `<button class="method ${on ? 'on' : ''}" data-action="${action}" data-v="${k}"><b>${m.label}</b><span>${m.text}</span></button>`;
     }
 
-    /* ---- Visit schedule ---- */
+    /* ---- Visit schedule (by arm) ---- */
     function scheduleTab(D) {
+      const multi = D.arms.length > 1;
+      if (S.dz.sarm !== 'all' && !D.arms.some((a) => a.id === S.dz.sarm)) S.dz.sarm = 'all';
+      const arm = multi ? S.dz.sarm : 'all';
+      const visits = D.visits.map((v, i) => ({ v, i })).filter(({ v }) => arm === 'all' || St.visitArms(D, v).includes(arm));
       const forms = Object.entries(D.forms);
       const vin = (v, i, prop, ph, w) => `<input class="input ${w || ''}" id="dz-v-${i}-${prop}" data-input="dz" data-k="visit" data-i="${i}" data-prop="${prop}" value="${esc(v[prop] == null ? '' : v[prop])}" placeholder="${ph}" ${dis()} ${prop === 'label' ? '' : 'inputmode="numeric"'}>`;
-      return `<div class="card tbl-wrap"><h3>Visits</h3><p class="small muted">Days are counted from enrolment. The window is how many days before and after the ideal day the visit can be done.</p>
-        <table class="tbl dz-visits"><thead><tr><th>Visit</th><th>Day</th><th>Days before</th><th>Days after</th><th></th></tr></thead><tbody>
-          ${D.visits.map((v, i) => `<tr><td>${vin(v, i, 'label', 'Name', 'wide')}</td><td>${i === 0 ? '0 (enrolment)' : vin(v, i, 'day', 'day', 'num')}</td><td>${i === 0 ? '—' : vin(v, i, 'before', '0', 'num')}</td><td>${i === 0 ? '—' : vin(v, i, 'after', '0', 'num')}</td>
-            <td>${editing() && i > 0 ? `<button class="icon-btn" data-action="dz-del-visit" data-i="${i}" aria-label="Remove visit">${icon('x')}</button>` : ''}</td></tr>`).join('')}
+      // In "All arms", a section asked in only some arms shows as partly ticked.
+      const cell = (v, fid) => {
+        const arms = arm === 'all' ? (multi ? St.visitArms(D, v) : [null]) : [arm];
+        const n = arms.filter((a) => RS.formsAt(v, a).includes(fid)).length;
+        const state = n === 0 ? 'off' : n === arms.length ? 'on' : 'some';
+        if (!editing()) return state === 'on' ? '●' : state === 'some' ? '<span title="Some arms">◐</span>' : '';
+        return `<input type="checkbox" aria-label="${esc(D.forms[fid].title)} at ${esc(v.label)}" data-action="dz-sched" data-form="${fid}" data-visit="${v.id}" data-arm="${arm}" ${state === 'on' ? 'checked' : ''} ${state === 'some' ? 'data-some="1" title="Asked in some arms only: tick to ask it in every arm"' : ''}>${state === 'some' ? '<span class="some-mark">some arms</span>' : ''}`;
+      };
+      const others = D.arms.filter((a) => a.id !== arm);
+      return `${multi ? `<div class="arm-switch"><span class="lbl">Schedule for</span>${[['all', 'All arms'], ...D.arms.map((a) => [a.id, armLabel(D, a.id)])].map(([k, l]) => `<button class="chip ${arm === k ? 'on' : ''}" data-action="dz-sched-arm" data-v="${k}">${esc(l)}</button>`).join('')}</div>
+        <p class="small muted">${arm === 'all' ? 'Changes here apply to every arm. Pick an arm to give it its own visits or sections.' : `Changes here apply only to ${esc(armLabel(D, arm))}.`}</p>` : ''}
+        ${multi && arm !== 'all' && editing() && others.length ? `<div class="card copy-arm"><div class="btn-row"><span>Copy the schedule of</span><select class="input" id="dzCopyFrom" style="width:auto">${others.map((a) => `<option value="${a.id}">${esc(armLabel(D, a.id))}</option>`).join('')}</select><button class="btn" data-action="dz-copy-sched">Copy to ${esc(armLabel(D, arm))}</button></div><p class="small muted">The same visits, asking the same sections. You can change it afterwards.</p></div>` : ''}
+        <div class="card tbl-wrap"><h3>Visits${arm !== 'all' ? ' for ' + esc(armLabel(D, arm)) : ''}</h3><p class="small muted">Days are counted from enrolment; the window is how many days before and after the ideal day the visit can be done.${multi ? ' A visit has the same day in every arm that has it: for a different timing in one arm, add a separate visit for that arm.' : ''}</p>
+        <table class="tbl dz-visits"><thead><tr><th>Visit</th><th>Day</th><th>Days before</th><th>Days after</th>${multi && arm === 'all' ? '<th>Arms</th>' : ''}<th></th></tr></thead><tbody>
+          ${visits.map(({ v, i }) => `<tr><td>${vin(v, i, 'label', 'Name', 'wide')}</td><td>${i === 0 ? '0 (enrolment)' : vin(v, i, 'day', 'day', 'num')}</td><td>${i === 0 ? '—' : vin(v, i, 'before', '0', 'num')}</td><td>${i === 0 ? '—' : vin(v, i, 'after', '0', 'num')}</td>
+            ${multi && arm === 'all' ? `<td class="nowrap">${i === 0 ? '<span class="small muted">every arm</span>' : D.arms.map((a, ai) => (editing() ? `<label class="check inline" title="${esc(armLabel(D, a.id))}"><input type="checkbox" data-action="dz-visit-arm" data-visit="${v.id}" data-arm="${a.id}" ${St.visitArms(D, v).includes(a.id) ? 'checked' : ''}><span>${ai + 1}</span></label>` : St.visitArms(D, v).includes(a.id) ? `<span class="tag">${ai + 1}</span> ` : '')).join('')}</td>` : ''}
+            <td>${editing() && i > 0 ? `<button class="icon-btn" data-action="dz-del-visit" data-i="${i}" aria-label="${arm === 'all' ? 'Remove visit' : 'Remove from this arm'}" title="${arm === 'all' ? 'Remove visit' : 'Remove from this arm'}">${icon('x')}</button>` : ''}</td></tr>`).join('')}
         </tbody></table>
-        ${editing() ? `<button class="btn" data-action="dz-add-visit">${icon('plus')} Add a visit</button>` : ''}</div>
-        <div class="card tbl-wrap"><h3>Which sections each visit asks</h3>
-        ${forms.length ? `<table class="tbl dz-matrix"><thead><tr><th>Section</th>${D.visits.map((v) => `<th>${esc(v.label)}</th>`).join('')}</tr></thead><tbody>
-          ${forms.map(([id, f]) => `<tr><td><b>${esc(f.title)}</b>${D.arms.length > 1 && f.arms && f.arms.length ? `<div class="small muted">${esc(f.arms.map((a) => armLabel(D, a)).join(', '))}</div>` : ''}</td>${D.visits.map((v) => `<td class="c">${editing() ? `<input type="checkbox" aria-label="${esc(f.title)} at ${esc(v.label)}" data-action="dz-form-visit" data-form="${id}" data-visit="${v.id}" ${v.forms.includes(id) ? 'checked' : ''}>` : v.forms.includes(id) ? '●' : ''}</td>`).join('')}</tr>`).join('')}
-        </tbody></table>` : '<p class="muted small">Add sections first.</p>'}</div>`;
+        ${editing() ? `<button class="btn" data-action="dz-add-visit">${icon('plus')} Add a visit${arm !== 'all' ? ' for ' + esc(armLabel(D, arm)) : ''}</button>` : ''}</div>
+        <div class="card tbl-wrap"><h3>Sections asked at each visit${arm !== 'all' ? ' · ' + esc(armLabel(D, arm)) : ''}</h3>
+        ${forms.length ? `<table class="tbl dz-matrix"><thead><tr><th>Section</th>${visits.map(({ v }) => `<th>${esc(v.label)}</th>`).join('')}</tr></thead><tbody>
+          ${forms.map(([id, f]) => `<tr><td><b>${esc(f.title || 'Untitled section')}</b></td>${visits.map(({ v }) => `<td class="c">${cell(v, id)}</td>`).join('')}</tr>`).join('')}
+        </tbody></table>` : '<p class="muted small">Add sections on the Sections and questions tab first.</p>'}</div>`;
     }
 
     /* ---- Parts still in the protocol file ---- */
@@ -223,8 +232,7 @@
       return `<div class="card"><h3>Published versions</h3>
         ${st.published.length ? `<table class="tbl"><thead><tr><th>Version</th><th>Published</th><th>By</th><th>Reason</th></tr></thead><tbody>${st.published.slice().reverse().map((v) => `<tr><td><b>${esc(v.version)}</b></td><td>${esc(new Date(v.at).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }))}</td><td>${esc(v.by)}</td><td>${esc(v.reason)}</td></tr>`).join('')}</tbody></table>` : '<p class="muted small">None yet.</p>'}
         <p class="small muted">Each visit record keeps the version it was collected under. Every unlock and publish is in the audit trail.</p></div>
-        <div class="card demo-only"><h3>Demo</h3><p class="small muted">Try building a study from nothing, then come back to the ICEHALL demo. Both clear the demo data on this tablet.</p>
-          <div class="btn-row"><button class="btn" data-action="dz-blank">Start a new, empty study</button><button class="btn" data-action="dz-restore">Restore the ICEHALL demo</button></div></div>`;
+        <div class="card demo-only"><h3>Demo</h3><p class="small muted">To build a study from nothing, use <b>Clear study</b> at the bottom of the menu. <b>Reset demo data</b> brings back the ICEHALL demo.</p></div>`;
     }
 
     /* ---------------------------------------------------------------- */
@@ -323,8 +331,8 @@
           <div class="btn-row end"><button class="btn primary" data-action="close-modal">Close</button></div></div>`;
       }
       if (m.type === 'dz-blank') {
-        return `<div class="modal-card">${head('Start a new, empty study?')}<p>Demo only: this clears the ICEHALL demo study and its data from this tablet. Data collectors see “No active study” until you publish the new design.</p><p class="small muted">Restore the ICEHALL demo at any time from Versions, or with Reset demo data.</p>
-          <div class="btn-row end"><button class="btn" data-action="close-modal">Cancel</button><button class="btn danger" data-action="dz-blank-yes">Start a new study</button></div></div>`;
+        return `<div class="modal-card">${head('Clear the study?')}<p>Demo only: this removes the current study design and all its participants and visits from this tablet, so you can build a new study from the start in <b>Study design</b> (supervisor view). Data collectors see “No active study” until it is published.</p><p class="small muted">Reset demo data brings back the ICEHALL demo at any time.</p>
+          <div class="btn-row end"><button class="btn" data-action="close-modal">Cancel</button><button class="btn danger" data-action="dz-blank-yes">Clear the study</button></div></div>`;
       }
       return null;
     }
@@ -333,10 +341,8 @@
     /* Actions and inputs                                                */
     /* ---------------------------------------------------------------- */
     const field = (el) => d().forms[el.dataset.form].fields[Number(el.dataset.i)];
-    const nextArmId = (D) => { let n = D.arms.length + 1; while (D.arms.some((a) => a.id === 'arm' + n)) n++; return 'arm' + n; };
     const handlers = {
       'dz-tab': (el) => { S.dz.tab = el.dataset.v; ui.render(); },
-      'dz-arm-view': (el) => { S.dz.arm = el.dataset.v; ui.render(); },
       'dz-form-open': (el) => { S.dz.open[el.dataset.form] = !S.dz.open[el.dataset.form]; ui.render(); },
       'dz-field-open': (el) => { S.dz.field = S.dz.field === el.dataset.key ? null : el.dataset.key; ui.render(); },
       'dz-preview': (el) => { S.dz.pv = {}; ui.openModal({ type: 'dz-preview', form: el.dataset.form }); },
@@ -361,52 +367,58 @@
       'dz-discard': () => ui.openModal({ type: 'dz-discard' }),
       'dz-discard-yes': () => { St.discard(); RS.audit(ui.getDb(), { by: ui.me().name, what: 'Study design draft discarded' }); ui.save(); ui.closeModal(); ui.render(); ui.toast('Draft discarded. The design is locked.'); },
       'dz-blank': () => ui.openModal({ type: 'dz-blank' }),
-      'dz-blank-yes': () => { St.startBlank(); ui.setDb(RS.emptyDb()); location.reload(); },
+      'dz-blank-yes': () => {
+        St.startBlank();
+        ui.setDb(RS.emptyDb());
+        // Open the empty design as the supervisor.
+        try { localStorage.setItem('icehall.research.ui', JSON.stringify({ role: 'SUPERVISOR' })); sessionStorage.setItem('jamii.research.return', 'design'); } catch (e) { /* private mode */ }
+        location.reload();
+      },
       'dz-restore': () => { if (!confirm('Restore the ICEHALL demo study and its demo data on this tablet?')) return; ui.resetAll(); },
 
       'dz-arms-n': (el) => {
         const D = d();
-        if (Number(el.dataset.n) > 0) { D.arms.push({ id: nextArmId(D), name: '' }); changed(); return; }
+        if (Number(el.dataset.n) > 0) { St.addArm(D); changed(); return; }
         const last = D.arms[D.arms.length - 1];
         const n = ui.getDb().participants.filter((p) => p.enrolledAt && RS.armOf(p) === last.id).length;
         if (n) { ui.toast(`${armLabel(D, last.id)} has ${plural(n, 'participant')}: it can't be removed.`); return; }
-        D.arms.pop();
-        Object.values(D.forms).forEach((f) => { if (f.arms) { f.arms = f.arms.filter((a) => a !== last.id); if (!f.arms.length) delete f.arms; } });
-        (D.clusters || []).forEach((c) => { if (c.armId === last.id) c.armId = D.arms[0].id; });
-        Object.keys(D.assignment.collectorArms || {}).forEach((k) => { if (D.assignment.collectorArms[k] === last.id) D.assignment.collectorArms[k] = D.arms[0].id; });
-        if (S.dz.arm === last.id) S.dz.arm = 'all';
+        St.removeArm(D, last.id);
+        if (S.dz.sarm === last.id) S.dz.sarm = 'all';
         changed();
       },
       'dz-method': (el) => { if (!editing()) return; d().assignment.method = el.dataset.v; changed(); },
       'dz-visible': (el) => { if (!editing()) return; d().assignment.visible = el.dataset.v; changed(); },
-      'dz-copy-arm': (el) => {
+      'dz-sched-arm': (el) => { S.dz.sarm = el.dataset.v; ui.render(); },
+      'dz-copy-sched': () => {
         const from = document.getElementById('dzCopyFrom').value;
-        St.copyArm(d(), from, S.dz.arm, el.dataset.sep === '1');
+        if (!confirm(`Replace the schedule of ${armLabel(d(), S.dz.sarm)} with the schedule of ${armLabel(d(), from)}?`)) return;
+        St.copySchedule(d(), from, S.dz.sarm);
         changed();
-        ui.toast(el.dataset.sep === '1' ? 'Separate copies made for this arm' : 'This arm now uses the same sections');
+        ui.toast('Schedule copied');
+      },
+      'dz-sched': (el) => {
+        // A partly ticked box (some arms) becomes ticked for every arm.
+        const on = el.dataset.some ? true : el.checked;
+        St.setVisitForm(d(), el.dataset.visit, el.dataset.form, d().arms.length > 1 ? el.dataset.arm : 'all', on);
+        changed();
+      },
+      'dz-visit-arm': (el) => {
+        if (!St.setVisitArm(d(), el.dataset.visit, el.dataset.arm, el.checked)) { ui.toast('A visit needs at least one arm. Remove the visit instead.'); ui.render(); return; }
+        changed();
+      },
+      'dz-form-dup': (el) => {
+        const id = St.duplicateForm(d(), el.dataset.form);
+        S.dz.open[id] = true;
+        changed();
+        ui.toast('Copied with new variable names. Set when it is asked on the Visit schedule tab.');
       },
       'dz-add-form': () => {
         const D = d();
         const id = St.newFormId(D, 'section');
         D.forms[id] = { title: '', fields: [] };
-        if (S.dz.arm !== 'all' && D.arms.length > 1) D.forms[id].arms = [S.dz.arm];
-        D.visits[0].forms.push(id);
         S.dz.open[id] = true;
         changed();
         const n = document.getElementById('dz-ft-' + id); if (n) n.focus();
-      },
-      'dz-form-arm': (el) => {
-        const D = d(), f = D.forms[el.dataset.form];
-        let arms = f.arms && f.arms.length ? f.arms.slice() : D.arms.map((a) => a.id);
-        arms = el.checked ? [...new Set([...arms, el.dataset.arm])] : arms.filter((a) => a !== el.dataset.arm);
-        if (!arms.length) { ui.toast('A section needs at least one arm. Remove the section instead.'); ui.render(); return; }
-        if (arms.length === D.arms.length) delete f.arms; else f.arms = arms;
-        changed();
-      },
-      'dz-form-visit': (el) => {
-        const v = d().visits.find((x) => x.id === el.dataset.visit);
-        v.forms = el.checked ? [...new Set([...v.forms, el.dataset.form])] : v.forms.filter((x) => x !== el.dataset.form);
-        changed();
       },
       'dz-form-del': (el) => {
         const D = d(), f = D.forms[el.dataset.form];
@@ -440,18 +452,27 @@
       'dz-opt-del': (el) => { field(el).options.splice(Number(el.dataset.j), 1); changed(); },
       'dz-add-visit': () => {
         const D = d();
-        const lastDay = Math.max(...D.visits.map((v) => v.day));
+        const arm = D.arms.length > 1 ? S.dz.sarm || 'all' : 'all';
+        const lastDay = Math.max(...D.visits.filter((v) => arm === 'all' || St.visitArms(D, v).includes(arm)).map((v) => v.day));
         const day = lastDay + 90;
-        let id = 'm' + Math.round(day / 30.4), n = 2;
-        while (D.visits.some((v) => v.id === id)) id = 'm' + Math.round(day / 30.4) + '_' + n++;
-        D.visits.push({ id, label: `Month ${Math.round(day / 30.4)}`, day, before: 14, after: 14, forms: [] });
+        const m = Math.round(day / 30.4);
+        let id = 'm' + m, n = 2;
+        while (D.visits.some((v) => v.id === id)) id = 'm' + m + '_' + n++;
+        const v = { id, label: `Month ${m}`, day, before: 14, after: 14, forms: [] };
+        if (arm !== 'all') v.arms = [arm];
+        if (D.visits.some((x) => x.armForms)) { v.armForms = {}; D.arms.forEach((a) => { v.armForms[a.id] = []; }); }
+        D.visits.push(v);
+        D.visits.sort((x, y) => x.day - y.day);
         changed();
       },
       'dz-del-visit': (el) => {
         const D = d(), v = D.visits[Number(el.dataset.i)];
-        const n = ui.getDb().visits.filter((r) => r.visit === v.id).length;
-        if (n) { ui.toast(`${v.label} has ${plural(n, 'visit record')}: it can't be removed.`); return; }
-        D.visits.splice(Number(el.dataset.i), 1);
+        const arm = D.arms.length > 1 ? S.dz.sarm || 'all' : 'all';
+        const db = ui.getDb();
+        const recs = db.visits.filter((r) => r.visit === v.id && (arm === 'all' || RS.armOf(db.participants.find((p) => p.id === r.participantId)) === arm)).length;
+        if (recs) { ui.toast(`${v.label} has ${plural(recs, 'visit record')}${arm === 'all' ? '' : ' in this arm'}: it can't be removed.`); return; }
+        if (arm !== 'all' && St.visitArms(D, v).length > 1) St.setVisitArm(D, v.id, arm, false);
+        else D.visits.splice(Number(el.dataset.i), 1);
         changed();
       },
       xp: (el) => {

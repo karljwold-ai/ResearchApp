@@ -43,13 +43,19 @@ assignment: {
   blockSizes: [4, 6],              // for method "random" (permuted blocks)
 },
 clusters: [{ id: 'esperance', name: 'Esperance Trebuchet', armId: 'arm1' }],
-forms: { diet: { title: '…', arms: ['arm1'], fields: [ … ] } },   // no "arms": every arm asks it
+visits: [
+  { id: 'baseline', label: 'Baseline', day: 0, forms: ['history', 'diet'] },          // every arm
+  { id: 'm3', label: 'Month 3', day: 91, before: 14, after: 14, arms: ['arm2'],       // only arm 2 has it
+    forms: ['diet', 'phq9'], armForms: { arm2: ['diet', 'phq9'] } },                  // sections per arm
+],
 retired: [{ id: 'occupation', label: '…', type: 'choice', retiredFrom: 'demographics' }],
 ```
 
 - The participant's arm is fixed at consent (`participant.arm`, with `participant.allocation`:
   how, slot, reason, design version). Before that, or in older records, it comes from the cluster.
-- A section with `arms` is asked only in those arms. Conditions can't use the arm.
+- A visit with `arms` is only for those arms (none: every arm; the first visit is always for every
+  arm). `armForms` gives each arm its own sections at that visit; without it, every arm asks `forms`.
+  The design keeps `forms` as every section asked by any arm. Conditions can't use the arm.
 - `retired` lists questions removed after they were published: they are no longer asked, and stay in
   the exports and the codebook.
 - Each published version records who, when and why; visit records keep `designVersion`.

@@ -107,6 +107,8 @@
       v.before = v.before || 0; v.after = v.after || 0;
       if (i === 0 && v.day !== 0) err(v.id, 'the first visit must be day 0 (the initial visit)');
       (v.forms || []).forEach((fid) => { if (!p.forms[fid]) err(v.id, `unknown form “${fid}”`); });
+      Object.values(v.armForms || {}).forEach((list) => list.forEach((fid) => { if (!p.forms[fid]) err(v.id, `unknown form “${fid}”`); }));
+      if (i === 0 && v.arms && v.arms.length) err(v.id, 'the first visit is for every arm');
     });
     const enc = (p.messages && p.messages.encouragement) || [];
     enc.forEach((e) => { e.tree = e.when ? cond('message ' + e.id, e.when) : null; if (!p.messages.templates[e.template]) err('message ' + e.id, `unknown template “${e.template}”`); });
@@ -146,6 +148,13 @@
     const c = proto && (proto.clusters || []).find((x) => x.id === part.cluster);
     return (c && c.armId) || null;
   };
+  /*
+   * Arms can have different schedules. A visit with `arms` is only for those arms (none: every arm),
+   * and `armForms` can give an arm its own sections at that visit (none: `forms`).
+   */
+  RS.visitInArm = (v, arm) => !v.arms || !v.arms.length || !arm || v.arms.includes(arm);
+  RS.visitsFor = (proto, part) => { const arm = RS.armOf(part); return proto.visits.filter((v) => RS.visitInArm(v, arm)); };
+  RS.formsAt = (v, arm) => (v.armForms && arm && v.armForms[arm] ? v.armForms[arm] : v.forms) || [];
   /** ctxFor with prev_ values taken from the participant's completed visits before `rec` (or all, without rec). */
   RS.ctxForVisit = (db, part, rec, on) => {
     const prior = db.visits.filter((r) => r.participantId === part.id && r.status === 'complete' && r.id !== (rec && rec.id) && (!rec || !rec.date || r.date <= rec.date));
@@ -187,7 +196,7 @@
     const env = envFor(proto, values, ctx);
     // A section is asked only in the arms that use it (no list: every arm).
     const inArm = (form) => !form.arms || !form.arms.length || !ctx.arm || form.arms.includes(ctx.arm);
-    return visitDef.forms.map((fid) => proto.forms[fid]).filter((form) => form && inArm(form) && (!form.showTree || RS.rules.truthy(form.showTree, env)))
+    return RS.formsAt(visitDef, ctx.arm).map((fid) => proto.forms[fid]).filter((form) => form && inArm(form) && (!form.showTree || RS.rules.truthy(form.showTree, env)))
       .map((form) => ({ form, fields: form.fields.filter((f) => shown(f, env)) })).filter((x) => x.fields.length);
   };
   RS.screeningFields = (proto, answers, ctx) => { const env = envFor(proto, answers, ctx); return proto.screening.fields.filter((f) => shown(f, env)); };
@@ -304,14 +313,15 @@
     horizon = horizon == null ? 30 : horizon;
     const rows = [];
     db.participants.filter((p) => p.status === 'enrolled').forEach((p) => {
-      proto.visits.slice(1).forEach((v) => {
+      const visits = RS.visitsFor(proto, p);
+      visits.slice(1).forEach((v) => {
         const status = RS.visitStatus(db, p, v, on);
         const w = RS.visitWindow(p, v);
         if (status === 'done' || status === 'stopped') return;
         if (status === 'upcoming' && between(on, w.start) > horizon) return;
         // A missed visit stays on the list until the next visit's window opens.
         if (status === 'missed') {
-          const next = proto.visits[proto.visits.indexOf(v) + 1];
+          const next = visits[visits.indexOf(v) + 1];
           if (next && on >= RS.visitWindow(p, next).start) return;
         }
         rows.push({ participant: p, visit: v, window: w, status, draft: !!RS.draftRec(db, p.id, v.id) });
@@ -323,7 +333,7 @@
 
   /** The participant's next visit that isn't done (or null when finished). */
   RS.nextVisit = function (db, proto, part, on) {
-    for (const v of proto.visits) {
+    for (const v of RS.visitsFor(proto, part)) {
       const s = RS.visitStatus(db, part, v, on);
       if (s === 'due' || s === 'upcoming') return { visit: v, status: s, window: RS.visitWindow(part, v) };
     }
@@ -395,7 +405,7 @@
     const M = proto.messages;
     const out = [];
     db.participants.filter(RS.canText).forEach((p) => {
-      proto.visits.slice(1).forEach((v) => {
+      RS.visitsFor(proto, p).slice(1).forEach((v) => {
         const s = RS.visitStatus(db, p, v, on);
         const w = RS.visitWindow(p, v);
         const key = `${p.id}:${v.id}`;
@@ -457,7 +467,7 @@
     on = on || today();
     const ids = new Set(parts.map((p) => p.id));
     let due = 0, done = 0, inWin = 0, missed = 0, openNow = 0;
-    parts.filter((p) => p.enrolledAt).forEach((p) => proto.visits.slice(1).forEach((v) => {
+    parts.filter((p) => p.enrolledAt).forEach((p) => RS.visitsFor(proto, p).slice(1).forEach((v) => {
       const s = RS.visitStatus(db, p, v, on);
       const w = RS.visitWindow(p, v);
       if (s === 'upcoming' || s === 'stopped') return;

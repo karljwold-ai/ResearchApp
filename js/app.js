@@ -165,6 +165,7 @@
         ${RS.noStudy ? '' : `<p>${esc(P.title.split(':')[0])} protocol ${esc(P.version)} · design version ${esc(P.designVersion || '—')}. ${esc(P.status)}</p>`}
         <p>Prototype: SMS, sync and sign-in are not connected.</p>
         <button class="btn sm ghost" data-action="reset-demo">${icon('reset')}<span class="nav-label">Reset demo data</span></button>
+        <button class="btn sm ghost" data-action="dz-blank" title="Remove the study and its data to build a new one (demo)">${icon('x')}<span class="nav-label">Clear study</span></button>
       </div>`;
     document.querySelectorAll('[data-role]').forEach((b) => b.classList.toggle('active', b.dataset.role === S.role));
     const sel = $('collectorSel');
@@ -581,7 +582,7 @@
       <div class="card tbl-wrap"><table class="tbl"><thead><tr><th>ID</th><th>Name</th><th>Cluster</th><th>Status</th><th>Next visit</th><th></th></tr></thead><tbody>
         ${list.map((p) => {
           const nx = p.status === 'enrolled' ? RS.nextVisit(db, P, p) : null;
-          const missed = p.status === 'enrolled' && P.visits.some((v) => RS.visitStatus(db, p, v) === 'missed');
+          const missed = p.status === 'enrolled' && RS.visitsFor(P, p).some((v) => RS.visitStatus(db, p, v) === 'missed');
           const nq = db.queries.filter((x) => x.participantId === p.id && x.status !== 'closed').length;
           return `<tr class="click" data-action="open-participant" data-pid="${p.id}"><td class="mono">${esc(pLabel(p))}</td><td><b>${esc(p.name)}</b><div class="small muted">${esc(ageText(p))} · ${p.sex === 'F' ? 'F' : 'M'}</div></td><td>${esc(clusterOf(p).name)}<div class="small muted">${esc(armText(p))}</div></td><td>${statusTag(p)}</td>
             <td>${nx ? `${esc(nx.visit.label)}<div class="small ${nx.status === 'due' ? '' : 'muted'}">${esc(RS.windowText(nx.status, nx.window))}</div>` : ''}${missed ? '<span class="tag missed">Missed visit</span>' : ''}</td>
@@ -637,7 +638,7 @@
       </div>`}</div></div>
       ${p.status === 'enrolled' || p.status === 'withdrawn' ? `<div class="card"><div class="card-head"><h3>Visits</h3><span class="muted small">Windows are counted from enrolment, so a late visit doesn't move the next one</span></div>
         <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Visit</th><th>Window</th><th>Status</th><th>Done</th><th>BP</th>${a1c.length ? '<th>HbA1c</th>' : ''}<th></th></tr></thead><tbody>
-        ${P.visits.map((v) => {
+        ${RS.visitsFor(P, p).map((v) => {
           const st = RS.visitStatus(db, p, v);
           const w = RS.visitWindow(p, v);
           const r = RS.doneRec(db, p.id, v.id);
@@ -708,7 +709,7 @@
     let all, label;
     if (a === 'all') { all = can; label = 'All my participants'; }
     else if (a.startsWith('cluster:')) { const c = P.clusters.find((x) => x.id === a.slice(8)); all = can.filter((p) => p.cluster === c.id); label = 'Cluster: ' + c.name; }
-    else if (a === 'due7') { all = can.filter((p) => P.visits.some((v) => { const st = RS.visitStatus(db, p, v); return st === 'due' || (st === 'upcoming' && D.between(D.today(), RS.visitWindow(p, v).start) <= 7); })); label = 'Visit due within 7 days'; }
+    else if (a === 'due7') { all = can.filter((p) => RS.visitsFor(P, p).some((v) => { const st = RS.visitStatus(db, p, v); return st === 'due' || (st === 'upcoming' && D.between(D.today(), RS.visitWindow(p, v).start) <= 7); })); label = 'Visit due within 7 days'; }
     else { const p = part(a.slice(7)); all = p ? [p] : []; label = p ? pLabel(p) : ''; }
     return { label, ok: all.filter(RS.canText), excluded: all.filter((p) => !RS.canText(p)), group: !a.startsWith('person:') };
   }
@@ -850,7 +851,7 @@
   /** Missed follow-up visits (window closed, not done), most recent first. */
   function missedList(ps) {
     const rows = [];
-    ps.filter((p) => p.status === 'enrolled').forEach((p) => P.visits.forEach((v) => { if (RS.visitStatus(db, p, v) === 'missed') rows.push({ p, v, w: RS.visitWindow(p, v) }); }));
+    ps.filter((p) => p.status === 'enrolled').forEach((p) => RS.visitsFor(P, p).forEach((v) => { if (RS.visitStatus(db, p, v) === 'missed') rows.push({ p, v, w: RS.visitWindow(p, v) }); }));
     if (!rows.length) return '';
     rows.sort((a, b) => b.w.end.localeCompare(a.w.end));
     return `<div class="card tbl-wrap"><h3>Missed visits (${rows.length})</h3><table class="tbl"><thead><tr><th>Participant</th><th>Visit</th><th>Window closed</th><th>Cluster</th><th>Collector</th><th>Reminder sent</th></tr></thead><tbody>
@@ -1154,7 +1155,7 @@
     } else if (m.type === 'enrolled') {
       const p = part(m.pid);
       html = `<div class="modal-card">${head('Enrolled')}<p><b>${esc(p.name)}</b> is now <b class="mono">${esc(p.studyId)}</b> (${esc([clusterOf(p).name, armText(p)].filter(Boolean).join(', '))}).</p>
-        <table class="tbl"><tbody>${P.visits.slice(1).map((v) => `<tr><td>${esc(v.label)}</td><td>${esc(RS.rangeText(RS.visitWindow(p, v)))}</td></tr>`).join('')}</tbody></table>
+        <table class="tbl"><tbody>${RS.visitsFor(P, p).slice(1).map((v) => `<tr><td>${esc(v.label)}</td><td>${esc(RS.rangeText(RS.visitWindow(p, v)))}</td></tr>`).join('')}</tbody></table>
         <p class="small muted">Write the study ID and the next visit window on the participant's study card.</p>
         <div class="btn-row end"><button class="btn primary" data-action="close-modal">Done</button></div></div>`;
     }
@@ -1503,7 +1504,7 @@
     if (!h) return;
     if (el.tagName !== 'INPUT') e.preventDefault();
     const a = el.dataset.action;
-    if (isSup() ? COLLECTOR_ONLY.has(a) : SUPERVISOR_ONLY.has(a) || /^(dz-|xp$)/.test(a)) { toast(isSup() ? 'The supervisor view is for review: data collectors run visits and message participants.' : 'Only the supervisor can do this.'); return; }
+    if (isSup() ? COLLECTOR_ONLY.has(a) : SUPERVISOR_ONLY.has(a) || (/^(dz-|xp$)/.test(a) && !/^dz-blank/.test(a))) { toast(isSup() ? 'The supervisor view is for review: data collectors run visits and message participants.' : 'Only the supervisor can do this.'); return; }
     h(el, e);
   });
   // Belt and braces: the buttons are hidden in the other view too.

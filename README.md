@@ -52,12 +52,18 @@ programming.
   PHQ-9…). Each question has its wording, a variable name for the export, a type (yes/no, choose
   one, number, whole number, blood pressure, date, free text), and optionally a unit, allowed range,
   query range, note, *ask only if* condition, and whether it is required. **Preview** shows a section
-  as data collectors will see it.
-- **Arms**: set the number of arms and name them (“Arm 1: Intervention”). Switch between arms to see
-  each arm's sections. **Sections are shared**: each arm and each visit ticks the sections it asks,
-  so editing a section changes it in every arm that uses it. An arm with no sections offers to copy
-  another arm: *the same sections* (shared) or *separate copies* (its own version, new variable names).
-- **Visit schedule**: visits, their day and window, and which sections each visit asks.
+  as data collectors will see it. Each section shows **when it is asked**, arm by arm (for example
+  “Arm 1: Baseline, Month 12, Month 24 · Arm 2: Baseline, Month 24”), or “Visit schedule pending”.
+  A section is shared: editing it changes it wherever it is asked. **Duplicate section** makes a
+  separate version (new variable names) for an arm that needs different questions.
+- **Arms**: set the number of arms and name them (“Arm 1: Intervention”).
+- **Visit schedule**: where *when* and *for which arm* are set. Switch between **All arms** and each
+  arm. In *All arms*, visits and ticks apply to every arm (a section asked in only some arms shows
+  as “some arms”), and an Arms column says which arms have each visit. In an arm, you add visits just
+  for that arm and tick the sections it asks at each visit; **Copy the schedule of** another arm
+  fills it in. A visit has the same day and window in every arm that has it; a different timing in
+  one arm is a separate visit. The first visit (enrolment) is for every arm. Participants only get
+  their own arm's visits and sections.
 - **Assignment**: one arm; by cluster or site (ICEHALL: cluster-randomised); by data collector;
   chosen at enrolment (with a reason; flagged as a risk of bias); or randomised on the tablet from
   an allocation list of shuffled blocks. The arm is fixed at consent, before the baseline visit, and
@@ -75,8 +81,9 @@ programming.
   it: it is no longer asked, and its data stays in every export and the codebook.
 - **Not yet in the builder** (shown read-only under *Other protocol parts*, still edited in the
   protocol file): screening and eligibility, consent, calculated scores and safety rules.
-- **Demo**: *Versions* can start a new, empty study (data collectors see “No active study” until it
-  is published) and restore the ICEHALL demo.
+- **Demo**: **Clear study**, under *Reset demo data* at the bottom of the menu, removes the study and
+  its data so you can build a new one from the start (it opens Study design as the supervisor; data
+  collectors see “No active study” until it is published). *Reset demo data* brings back ICEHALL.
 
 ## Export data (supervisor)
 

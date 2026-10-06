@@ -428,3 +428,7 @@ body[data-role="COLLECTOR"] .seg-select { color: var(--level); }
 }
 .method.off { opacity: .7; border-style: dashed; }
 .method b { display: flex; align-items: center; gap: 6px; }
+.dz-when { background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 10px; padding: 10px 12px; font-size: 14px; display: grid; gap: 2px; }
+.dz-when .lbl { margin-bottom: 2px; }
+.some-mark { display: block; font-size: 10px; color: var(--amber); font-weight: 700; }
+.nowrap { white-space: nowrap; }
